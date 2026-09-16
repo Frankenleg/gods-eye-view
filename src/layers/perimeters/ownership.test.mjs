@@ -4,12 +4,7 @@ import { createFirePerimetersLayer } from './index.js';
 
 function harness(
   source,
-  {
-    pick = () => null,
-    inciwebIndex = null,
-    cardHit = () => null,
-    lookup = null,
-  } = {},
+  { pick = () => null, inciwebIndex = null, cardHit = () => null } = {},
 ) {
   const sources = [];
   const overlay = { entries: new Map(), visible: null };
@@ -61,7 +56,6 @@ function harness(
     inciwebSource: inciwebIndex
       ? { getIndex: async () => inciwebIndex }
       : { getIndex: async () => [] },
-    inciwebLookup: lookup ? { lookup } : null,
     openExternal: (url) => opened.push(url),
   });
   layer.init(viewer);
@@ -194,9 +188,9 @@ test('a refresh that drops the selected incident also drops its card', async () 
 test('a matched incident card carries the InciWeb line and click-through', async () => {
   const inciwebIndex = [
     {
-      name: 'fixture',
-      link: 'https://inciweb.wildfire.gov/incident-information/nmgnf-fixture-fire',
-      statePrefix: 'nm',
+      incident_id: '329300',
+      tau: 'NMGNF Fixture Fire',
+      incident_title: 'Fixture Fire',
     },
   ];
   let cardHitResult = null;
@@ -221,9 +215,7 @@ test('a matched incident card carries the InciWeb line and click-through', async
   cardHitResult = { entryId: entries[0].id };
   h.viewer.scene.pick = () => null;
   h.clicks.handler({ position: { x: 12, y: 12 } });
-  assert.deepEqual(h.opened, [
-    'https://inciweb.wildfire.gov/incident-information/nmgnf-fixture-fire',
-  ]);
+  assert.deepEqual(h.opened, ['https://inciweb.wildfire.gov/node/329300']);
   assert.equal(
     h.overlay.entries.get('fire-perimeters').length,
     1,
@@ -255,102 +247,28 @@ test('an unmatched incident renders no InciWeb line and card clicks stay inert',
   assert.equal(h.overlay.entries.get('fire-perimeters').length, 1);
 });
 
-test('an incident missing from the RSS index resolves through the lookup fallback', async () => {
-  const lookups = [];
-  const h = harness(
-    {
-      getSnapshot: async () => [
-        { ...row, stableId: 'sf', name: 'Second Flat', state: 'US-OR' },
-      ],
-    },
-    {
-      pick: () => ({ id: 'fire-perimeter:sf:0' }),
-      inciwebIndex: [],
-      lookup: async (title) => {
-        lookups.push(title);
-        return [
-          {
-            incident_id: '329195',
-            tau: 'ORBUD Second Flat',
-            incident_title: 'Second Flat',
-          },
-        ];
-      },
-    },
-  );
-  await h.layer.update(h.viewer);
-  h.clicks.handler({ position: { x: 10, y: 10 } });
-  await new Promise((done) => setTimeout(done, 0));
-  const entries = h.overlay.entries.get('fire-perimeters');
-  assert.deepEqual(lookups, ['Second Flat']);
-  assert.equal(entries[0].details.at(-1), 'InciWeb ↗ · click card to open');
-  assert.equal(entries[0].interactive, true);
-
-  // The resolved link is what a card click opens.
-  h.viewer.scene.pick = () => null;
-  h.clicks.handler({ position: { x: 12, y: 12 }, cardHit: true });
-  // (cardHit routing is exercised in the matched-card test; here we assert
-  // the cached result is reused without a second lookup on re-selection.)
-  h.viewer.scene.pick = () => ({ id: 'fire-perimeter:sf:0' });
-  h.clicks.handler({ position: { x: 10, y: 10 } });
-  await new Promise((done) => setTimeout(done, 0));
-  assert.deepEqual(lookups, ['Second Flat']);
-});
-
-test('a complex member missing everywhere tries its complex name in the lookup', async () => {
-  const lookups = [];
+test('a complex member resolves to its complex page from the catalog', async () => {
   const h = harness(
     { getSnapshot: async () => [row] },
     {
       pick: () => ({ id: 'fire-perimeter:2026-NMGNF-000123:0' }),
-      inciwebIndex: [],
-      lookup: async (title) => {
-        lookups.push(title);
-        return title === 'ROWE CREEK COMPLEX'
-          ? [
-              {
-                incident_id: '328923',
-                tau: 'ORPRD Rowe Creek Complex',
-                incident_title: 'Rowe Creek Complex',
-              },
-            ]
-          : [];
-      },
+      inciwebIndex: [
+        {
+          incident_id: '328923',
+          tau: 'ORPRD Rowe Creek Complex',
+          incident_title: 'Rowe Creek Complex',
+        },
+      ],
     },
   );
   await h.layer.update(h.viewer);
   h.clicks.handler({ position: { x: 10, y: 10 } });
-  await new Promise((done) => setTimeout(done, 0));
-  assert.deepEqual(lookups, ['Fixture Fire', 'ROWE CREEK COMPLEX']);
   const entries = h.overlay.entries.get('fire-perimeters');
   assert.equal(entries[0].details.at(-1), 'InciWeb ↗ · click card to open');
 });
 
-test('a failed lookup leaves the card linkless without breaking selection', async () => {
-  const h = harness(
-    { getSnapshot: async () => [{ ...row, complexName: null }] },
-    {
-      pick: () => ({ id: 'fire-perimeter:2026-NMGNF-000123:0' }),
-      inciwebIndex: [],
-      lookup: async () => {
-        throw new Error('InciWeb HTTP 503');
-      },
-    },
-  );
-  await h.layer.update(h.viewer);
-  h.clicks.handler({ position: { x: 10, y: 10 } });
-  await new Promise((done) => setTimeout(done, 0));
-  const entries = h.overlay.entries.get('fire-perimeters');
-  assert.equal(entries.length, 1);
-  assert.equal(
-    entries[0].details.some((line) => line.includes('InciWeb')),
-    false,
-  );
-});
-
 test('an InciWeb outage never breaks the perimeter refresh', async () => {
   const h = harness({ getSnapshot: async () => [row] });
-  h.layer._forTestOnly = undefined; // no-op: harness already wires an empty index
   const failing = createFirePerimetersLayer({
     source: { getSnapshot: async () => [row] },
     overlayHost: {

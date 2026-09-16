@@ -1,93 +1,34 @@
-/** InciWeb incident index: RSS parsing and WFIGS-name matching. Pure + fetch. */
+/** InciWeb incident catalog: full-index fetch and WFIGS-name matching. */
 
-// Public interagency incident-information site; permissive CORS, so the
-// browser fetches it directly.
-const RSS_URL = 'https://inciweb.wildfire.gov/incidents/rss.xml';
+// InciWeb's publication search; an empty title returns the full incident
+// catalog (~2k rows, ~200 KB). Permissive CORS, so the browser fetches it
+// directly. This supersedes the site's RSS feed, which only carries the
+// ~50 most recently updated incidents.
+const SEARCH_URL = 'https://inciweb.wildfire.gov/api/single-publication/';
 
 /**
- * Normalize an incident name for matching: lowercase, collapsed whitespace,
- * trailing "Fire" dropped (InciWeb titles carry it, WFIGS names do not).
+ * Normalize an incident title for matching: lowercase, collapsed whitespace,
+ * a leading year dropped ('2026 Coleman Creek'), a trailing 'Fire' dropped
+ * ('Coyote Fire') — InciWeb titles carry both decorations inconsistently and
+ * WFIGS names carry neither.
  */
 function normalizeName(name) {
-  const collapsed = String(name).toLowerCase().trim().replace(/\s+/g, ' ');
-  return collapsed.replace(/ fire$/, '');
+  return String(name)
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/^(19|20)\d{2} /, '')
+    .replace(/ fire$/, '');
 }
 
 /**
- * Parse the InciWeb RSS index into matchable entries.
- * Titles look like "TXTXS Lobo Fire" — a dispatch-unit code (whose first two
- * letters are the state) followed by the incident name.
- * @param {string} rssText - Raw RSS XML.
- * @returns {Array<{name: string, link: string, statePrefix: string|null}>}
- */
-export function parseInciwebIndex(rssText) {
-  if (typeof rssText !== 'string') return [];
-  const entries = [];
-  const itemPattern = /<item>([\s\S]*?)<\/item>/g;
-  for (const [, item] of rssText.matchAll(itemPattern)) {
-    const title = item.match(/<title>([^<]+)<\/title>/)?.[1];
-    const link = item.match(/<link>([^<]+)<\/link>/)?.[1];
-    if (!title || !link || !link.includes('/incident-information/')) continue;
-    const [unit, ...nameWords] = title.trim().split(/\s+/);
-    if (!unit || !nameWords.length) continue;
-    entries.push({
-      name: normalizeName(nameWords.join(' ')),
-      link: link.replace(/^http:\/\//, 'https://'),
-      statePrefix: /^[A-Za-z]{2}/.test(unit)
-        ? unit.slice(0, 2).toLowerCase()
-        : null,
-    });
-  }
-  return entries;
-}
-
-function matchByName(entries, name, state) {
-  if (!name) return null;
-  const wanted = normalizeName(name);
-  const candidates = entries.filter((entry) => entry.name === wanted);
-  if (candidates.length === 1) return candidates[0].link;
-  if (candidates.length > 1) {
-    const statePrefix =
-      typeof state === 'string' && /^US-[A-Za-z]{2}$/.test(state)
-        ? state.slice(3).toLowerCase()
-        : null;
-    if (!statePrefix) return null;
-    const byState = candidates.filter(
-      (entry) => entry.statePrefix === statePrefix,
-    );
-    if (byState.length === 1) return byState[0].link;
-  }
-  return null;
-}
-
-/**
- * Resolve one WFIGS incident to its InciWeb page, or null.
- * The incident's own name is tried first; a member of a complex whose own
- * name has no page falls back to the complex's page (InciWeb tracks the
- * managing complex, not each member fire). A unique name match wins
- * outright; an ambiguous name needs the WFIGS origin state (US-XX) to
- * agree with the dispatch unit's state prefix — anything still ambiguous
- * yields null rather than a wrong page.
- * @param {Array} entries - Parsed index.
- * @param {{name: ?string, state: ?string, complexName: ?string}} incident
- *   - WFIGS row facts.
- * @returns {?string} InciWeb URL.
- */
-export function findInciwebLink(entries, { name, state, complexName }) {
-  return (
-    matchByName(entries, name, state) ??
-    matchByName(entries, complexName, state)
-  );
-}
-
-/**
- * Resolve one WFIGS incident against `/api/single-publication/` results.
- * The endpoint is a substring search, so only publications whose normalized
- * title equals the incident's normalized name count. Ambiguity resolves by
- * the tau unit's state prefix, then by newest incident id (same-state
- * duplicates are usually reburns of the same name). The `/node/{id}` link
- * 301s to the canonical page, so no slug construction is needed.
- * @param {?Array} publications - single-publication response rows.
+ * Resolve one WFIGS incident against the publication catalog.
+ * Only rows whose normalized title equals the incident's normalized name
+ * count. Ambiguity resolves by the tau dispatch unit's state prefix, then
+ * by newest incident id (same-state duplicates are usually reburns of the
+ * same name). The `/node/{id}` link 301s to the canonical page, so no slug
+ * construction is needed.
+ * @param {?Array} publications - Publication catalog rows.
  * @param {{name: ?string, state: ?string}} incident - WFIGS row facts.
  * @returns {?string} InciWeb node URL.
  */
@@ -125,45 +66,40 @@ export function resolveInciwebNodeLink(publications, { name, state }) {
 }
 
 /**
- * Query InciWeb's publication search for one incident title. Complements
- * the RSS index, which only carries the ~50 most recently updated
- * incidents — older but still-active fires resolve only through here.
+ * Resolve one WFIGS incident to its InciWeb page, or null.
+ * The incident's own name is tried first; a member of a complex whose own
+ * name has no page falls back to the complex's page (InciWeb tracks the
+ * managing complex, not each member fire). Anything ambiguous yields null
+ * rather than a wrong page.
+ * @param {?Array} publications - Publication catalog rows.
+ * @param {{name: ?string, state: ?string, complexName: ?string}} incident
+ *   - WFIGS row facts.
+ * @returns {?string} InciWeb URL.
  */
-export function createInciwebLookupSource({
-  fetchImpl = (...args) => globalThis.fetch(...args),
-} = {}) {
-  return {
-    async lookup(title, { signal } = {}) {
-      signal?.throwIfAborted();
-      const response = await fetchImpl(
-        'https://inciweb.wildfire.gov/api/single-publication/',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title }),
-          signal,
-        },
-      );
-      if (!response.ok) throw new Error(`InciWeb HTTP ${response.status}`);
-      const rows = await response.json();
-      signal?.throwIfAborted();
-      return Array.isArray(rows) ? rows : [];
-    },
-  };
+export function findInciwebLink(publications, { name, state, complexName }) {
+  return (
+    resolveInciwebNodeLink(publications, { name, state }) ??
+    resolveInciwebNodeLink(publications, { name: complexName, state })
+  );
 }
 
-/** Fetch and parse the current InciWeb index. */
+/** Fetch the full InciWeb incident catalog. */
 export function createInciwebIndexSource({
   fetchImpl = (...args) => globalThis.fetch(...args),
 } = {}) {
   return {
     async getIndex({ signal } = {}) {
       signal?.throwIfAborted();
-      const response = await fetchImpl(RSS_URL, { signal });
+      const response = await fetchImpl(SEARCH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: '' }),
+        signal,
+      });
       if (!response.ok) throw new Error(`InciWeb HTTP ${response.status}`);
-      const text = await response.text();
+      const rows = await response.json();
       signal?.throwIfAborted();
-      return parseInciwebIndex(text);
+      return Array.isArray(rows) ? rows : [];
     },
   };
 }
