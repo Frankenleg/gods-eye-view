@@ -80,6 +80,55 @@ test('missing attributes degrade to available facts instead of placeholders', ()
   assert.deepEqual(card.details, ['containment unknown · RX']);
 });
 
+test('a known InciWeb page adds a link line to the card', () => {
+  const card = buildIncidentCard(
+    {
+      stableId: 'x',
+      name: 'Timber',
+      acres: 25426,
+      containedPct: 44,
+      state: 'US-CA',
+      category: 'WF',
+      discoveredTime: null,
+      updatedTime: null,
+      cause: null,
+      behavior: null,
+      personnel: null,
+      county: null,
+      costToDate: null,
+      complexity: null,
+    },
+    1758000000000,
+    { link: 'https://inciweb.wildfire.gov/incident-information/calpf-timber-fire' },
+  );
+  assert.equal(card.details.at(-1), 'InciWeb ↗ · click card to open');
+  assert.equal(card.interactive, true);
+  assert.match(card.accessibilityLabel, /InciWeb/);
+});
+
+test('a card without a link is not interactive', () => {
+  const card = buildIncidentCard(
+    {
+      stableId: 'x',
+      name: 'Crosswhite',
+      acres: 1,
+      containedPct: 1,
+      state: 'US-OR',
+      category: 'WF',
+      discoveredTime: null,
+      updatedTime: null,
+      cause: null,
+      behavior: null,
+      personnel: null,
+      county: null,
+      costToDate: null,
+      complexity: null,
+    },
+    1758000000000,
+  );
+  assert.equal(card.interactive, false);
+});
+
 test('partial incident details render only the facts that exist', () => {
   const card = buildIncidentCard(
     {

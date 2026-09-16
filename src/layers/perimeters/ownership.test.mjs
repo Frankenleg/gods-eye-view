@@ -2,11 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createFirePerimetersLayer } from './index.js';
 
-function harness(source, { pick = () => null } = {}) {
+function harness(
+  source,
+  { pick = () => null, inciwebIndex = null, cardHit = () => null } = {},
+) {
   const sources = [];
   const overlay = { entries: new Map(), visible: null };
   const clicks = { handler: null, destroyed: 0 };
   const owners = new Map();
+  const opened = [];
   const viewer = {
     scene: { pick },
     dataSources: {
@@ -30,6 +34,7 @@ function harness(source, { pick = () => null } = {}) {
       clearSource(sourceId) {
         overlay.entries.delete(sourceId);
       },
+      hitTest: (x, y, options) => cardHit(x, y, options),
     },
     screenSpaceEventHandlerFactory: () => ({
       setInputAction(callback) {
@@ -48,10 +53,14 @@ function harness(source, { pick = () => null } = {}) {
       unregisterPickOwner: (layerId) => owners.delete(layerId),
     },
     pointer: { isPointerFree: () => true },
+    inciwebSource: inciwebIndex
+      ? { getIndex: async () => inciwebIndex }
+      : { getIndex: async () => [] },
+    openExternal: (url) => opened.push(url),
   });
   layer.init(viewer);
   layer.enable(viewer);
-  return { layer, viewer, sources, overlay, clicks, owners };
+  return { layer, viewer, sources, overlay, clicks, owners, opened };
 }
 
 const ring = [
@@ -173,6 +182,111 @@ test('a refresh that drops the selected incident also drops its card', async () 
   rows = [{ ...row, stableId: 'different' }];
   await h.layer.update(h.viewer);
   assert.equal(h.overlay.entries.get('fire-perimeters')?.length ?? 0, 0);
+});
+
+test('a matched incident card carries the InciWeb line and click-through', async () => {
+  const inciwebIndex = [
+    {
+      name: 'fixture',
+      link: 'https://inciweb.wildfire.gov/incident-information/nmgnf-fixture-fire',
+      statePrefix: 'nm',
+    },
+  ];
+  let cardHitResult = null;
+  const h = harness(
+    { getSnapshot: async () => [{ ...row, name: 'Fixture' }] },
+    {
+      pick: () => null,
+      inciwebIndex,
+      cardHit: () => cardHitResult,
+    },
+  );
+  await h.layer.update(h.viewer);
+  // Select via a perimeter pick.
+  h.viewer.scene.pick = () => ({
+    id: 'fire-perimeter:2026-NMGNF-000123:0',
+  });
+  h.clicks.handler({ position: { x: 10, y: 10 } });
+  const entries = h.overlay.entries.get('fire-perimeters');
+  assert.equal(entries[0].details.at(-1), 'InciWeb ↗ · click card to open');
+
+  // Clicking the card itself opens the InciWeb page.
+  cardHitResult = { entryId: entries[0].id };
+  h.viewer.scene.pick = () => null;
+  h.clicks.handler({ position: { x: 12, y: 12 } });
+  assert.deepEqual(h.opened, [
+    'https://inciweb.wildfire.gov/incident-information/nmgnf-fixture-fire',
+  ]);
+  assert.equal(
+    h.overlay.entries.get('fire-perimeters').length,
+    1,
+    'opening the link must not clear the selection',
+  );
+});
+
+test('an unmatched incident renders no InciWeb line and card clicks stay inert', async () => {
+  let cardHitResult = null;
+  const h = harness(
+    { getSnapshot: async () => [row] },
+    {
+      pick: () => ({ id: 'fire-perimeter:2026-NMGNF-000123:0' }),
+      inciwebIndex: [],
+      cardHit: () => cardHitResult,
+    },
+  );
+  await h.layer.update(h.viewer);
+  h.clicks.handler({ position: { x: 10, y: 10 } });
+  const entries = h.overlay.entries.get('fire-perimeters');
+  assert.equal(
+    entries[0].details.some((line) => line.includes('InciWeb')),
+    false,
+  );
+  cardHitResult = { entryId: entries[0].id };
+  h.viewer.scene.pick = () => null;
+  h.clicks.handler({ position: { x: 12, y: 12 } });
+  assert.deepEqual(h.opened, []);
+  assert.equal(h.overlay.entries.get('fire-perimeters').length, 1);
+});
+
+test('an InciWeb outage never breaks the perimeter refresh', async () => {
+  const h = harness({ getSnapshot: async () => [row] });
+  h.layer._forTestOnly = undefined; // no-op: harness already wires an empty index
+  const failing = createFirePerimetersLayer({
+    source: { getSnapshot: async () => [row] },
+    overlayHost: {
+      setEntries() {},
+      setVisible() {},
+      clearSource() {},
+      hitTest: () => null,
+    },
+    screenSpaceEventHandlerFactory: () => ({
+      setInputAction() {},
+      destroy() {},
+    }),
+    picking: {
+      resolvePickId: () => null,
+      isOwnedByOtherLayer: () => false,
+      registerPickOwner() {},
+      unregisterPickOwner() {},
+    },
+    pointer: { isPointerFree: () => true },
+    inciwebSource: {
+      getIndex: async () => {
+        throw new Error('InciWeb HTTP 503');
+      },
+    },
+    openExternal: () => {},
+  });
+  const viewer = {
+    scene: { pick: () => null },
+    dataSources: { add() {}, remove() {} },
+  };
+  failing.init(viewer);
+  failing.enable(viewer);
+  assert.equal(await failing.update(viewer), true);
+  assert.equal(failing.getStats().count, 1);
+  failing.destroy(viewer);
+  h.layer.destroy(h.viewer);
 });
 
 test('analyst records expose incident facts without geometry payloads', async () => {

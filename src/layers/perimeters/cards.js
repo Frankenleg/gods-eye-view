@@ -80,9 +80,10 @@ function formatAge(deltaMs) {
  * `position` (Cartesian) separately — this model stays JSON-safe for tests.
  * @param {Object} row - Normalized perimeter row (see records.js).
  * @param {number} nowMs - Current epoch milliseconds.
+ * @param {{link: ?string}} [extras] - Optional InciWeb page for this incident.
  * @returns {Object} World-overlay entry without `position`.
  */
-export function buildIncidentCard(row, nowMs) {
+export function buildIncidentCard(row, nowMs, { link = null } = {}) {
   const facts = [];
   if (Number.isFinite(row.acres))
     facts.push(`${Math.round(row.acres).toLocaleString('en-US')} ac`);
@@ -121,12 +122,18 @@ export function buildIncidentCard(row, nowMs) {
   if (situation.length) details.push(situation.join(' · '));
   if (response.length) details.push(response.join(' · '));
   if (ages.length) details.push(ages.join(' · '));
+  if (link) details.push('InciWeb ↗ · click card to open');
 
+  const title = `FIRE · ${row.name || 'Unnamed incident'}`;
   return {
     id: `fire-perimeter-card:${row.stableId}`,
     actionable: true,
     selected: true,
-    title: `FIRE · ${row.name || 'Unnamed incident'}`,
+    // Only a linked card is clickable — the overlay host registers hit
+    // rectangles solely for interactive entries.
+    interactive: Boolean(link),
+    ...(link ? { accessibilityLabel: `Open ${title} on InciWeb` } : undefined),
+    title,
     details,
     accent: containmentAccent(row.containedPct),
     priority: Number.MAX_SAFE_INTEGER,

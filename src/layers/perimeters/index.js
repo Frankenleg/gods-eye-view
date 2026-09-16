@@ -4,9 +4,11 @@ import {
   perimeterAnchorDegrees,
   buildIncidentCard,
 } from './cards.js';
+import { findInciwebLink } from './inciweb.js';
 export { normalizeFirePerimeterSnapshot } from './records.js';
 export { createWfigsPerimeterSource } from './source.js';
 export * from './cards.js';
+export * from './inciweb.js';
 
 /** Fill/line color for a perimeter by containment progress. */
 export function containmentColor(containedPct) {
@@ -29,6 +31,8 @@ export function createFirePerimetersLayer({
   screenSpaceEventHandlerFactory = null,
   picking = null,
   pointer = null,
+  inciwebSource = null,
+  openExternal = null,
 } = {}) {
   if (typeof source?.getSnapshot !== 'function')
     throw new TypeError('Fire perimeters require a snapshot source');
@@ -41,6 +45,9 @@ export function createFirePerimetersLayer({
   let _enabled = false;
   let _clickHandler = null;
   let _selectedId = null;
+  let _selectedLink = null;
+  let _selectedCardId = null;
+  let _inciwebIndex = [];
   const _rowById = new Map();
 
   const canSelect = () =>
@@ -51,6 +58,8 @@ export function createFirePerimetersLayer({
     const row = _selectedId ? _rowById.get(_selectedId) : null;
     if (!row) {
       _selectedId = null;
+      _selectedLink = null;
+      _selectedCardId = null;
       overlayHost.setEntries(PERIMETER_OVERLAY_SOURCE_ID, [], {
         cohortLimit: 1,
         collisionCapacity: 1,
@@ -59,16 +68,25 @@ export function createFirePerimetersLayer({
       return;
     }
     const anchor = perimeterAnchorDegrees(row.polygons);
-    overlayHost.setEntries(
-      PERIMETER_OVERLAY_SOURCE_ID,
-      [
-        {
-          ...buildIncidentCard(row, Date.now()),
-          position: Cesium.Cartesian3.fromDegrees(anchor.lon, anchor.lat),
-        },
-      ],
-      { cohortLimit: 1, collisionCapacity: 1, moving: false },
-    );
+    _selectedLink = findInciwebLink(_inciwebIndex, row);
+    const card = {
+      ...buildIncidentCard(row, Date.now(), { link: _selectedLink }),
+      position: Cesium.Cartesian3.fromDegrees(anchor.lon, anchor.lat),
+    };
+    if (_selectedLink && openExternal) {
+      const link = _selectedLink;
+      // Keyboard/assistive activation mirrors the pointer click-through.
+      card.activate = () => {
+        openExternal(link);
+        return true;
+      };
+    }
+    _selectedCardId = card.id;
+    overlayHost.setEntries(PERIMETER_OVERLAY_SOURCE_ID, [card], {
+      cohortLimit: 1,
+      collisionCapacity: 1,
+      moving: false,
+    });
   }
 
   /** Resolve a scene pick to one of this layer's incident ids, or null. */
@@ -88,6 +106,17 @@ export function createFirePerimetersLayer({
     _clickHandler = screenSpaceEventHandlerFactory(_viewer);
     _clickHandler.setInputAction((click) => {
       if (pointer && !pointer.isPointerFree()) return;
+      // A click on the incident card itself opens its InciWeb page (when the
+      // incident has one) and never disturbs the selection.
+      const cardHit = overlayHost.hitTest?.(
+        click.position?.x,
+        click.position?.y,
+        { sourceId: PERIMETER_OVERLAY_SOURCE_ID },
+      );
+      if (cardHit && cardHit.entryId === _selectedCardId) {
+        if (_selectedLink && openExternal) openExternal(_selectedLink);
+        return;
+      }
       const picked = _viewer.scene.pick(click.position);
       const incidentId = picked ? pickedIncidentId(picked) : null;
       if (incidentId) {
@@ -119,6 +148,8 @@ export function createFirePerimetersLayer({
 
   function clearSelection() {
     _selectedId = null;
+    _selectedLink = null;
+    _selectedCardId = null;
     if (overlayHost) {
       overlayHost.clearSource(PERIMETER_OVERLAY_SOURCE_ID);
       overlayHost.setVisible?.(PERIMETER_OVERLAY_SOURCE_ID, false);
@@ -168,9 +199,20 @@ export function createFirePerimetersLayer({
       const request = new AbortController();
       _request = request;
       try {
-        const rows = await source.getSnapshot({ signal: request.signal });
+        // The InciWeb index rides along best-effort: an outage or malformed
+        // feed only costs the link line, never the perimeter refresh.
+        const [snapshot, inciweb] = await Promise.allSettled([
+          source.getSnapshot({ signal: request.signal }),
+          inciwebSource
+            ? inciwebSource.getIndex({ signal: request.signal })
+            : Promise.resolve([]),
+        ]);
+        if (snapshot.status === 'rejected') throw snapshot.reason;
+        const rows = snapshot.value;
         if (request.signal.aborted || _request !== request || !_enabled)
           return false;
+        if (inciweb.status === 'fulfilled' && Array.isArray(inciweb.value))
+          _inciwebIndex = inciweb.value;
 
         const nextEntities = [];
         for (const row of rows) {
