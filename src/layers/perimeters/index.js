@@ -1,6 +1,12 @@
 import * as Cesium from 'cesium';
+import {
+  PERIMETER_OVERLAY_SOURCE_ID,
+  perimeterAnchorDegrees,
+  buildIncidentCard,
+} from './cards.js';
 export { normalizeFirePerimeterSnapshot } from './records.js';
 export { createWfigsPerimeterSource } from './source.js';
+export * from './cards.js';
 
 /** Fill/line color for a perimeter by containment progress. */
 export function containmentColor(containedPct) {
@@ -14,8 +20,16 @@ export function containmentColor(containedPct) {
 const ringPositions = (ring) =>
   ring.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat));
 
-/** Own one fire-perimeter display and its refresh lifecycle. */
-export function createFirePerimetersLayer({ source } = {}) {
+const PICK_PREFIX = 'fire-perimeter:';
+
+/** Own one fire-perimeter display, its refresh lifecycle, and click selection. */
+export function createFirePerimetersLayer({
+  source,
+  overlayHost = null,
+  screenSpaceEventHandlerFactory = null,
+  picking = null,
+  pointer = null,
+} = {}) {
   if (typeof source?.getSnapshot !== 'function')
     throw new TypeError('Fire perimeters require a snapshot source');
   let _viewer = null;
@@ -25,6 +39,91 @@ export function createFirePerimetersLayer({ source } = {}) {
   let _lastUpdate = null;
   let _lastError = null;
   let _enabled = false;
+  let _clickHandler = null;
+  let _selectedId = null;
+  const _rowById = new Map();
+
+  const canSelect = () =>
+    overlayHost && screenSpaceEventHandlerFactory && picking;
+
+  function publishSelectedCard() {
+    if (!canSelect()) return;
+    const row = _selectedId ? _rowById.get(_selectedId) : null;
+    if (!row) {
+      _selectedId = null;
+      overlayHost.setEntries(PERIMETER_OVERLAY_SOURCE_ID, [], {
+        cohortLimit: 1,
+        collisionCapacity: 1,
+        moving: false,
+      });
+      return;
+    }
+    const anchor = perimeterAnchorDegrees(row.polygons);
+    overlayHost.setEntries(
+      PERIMETER_OVERLAY_SOURCE_ID,
+      [
+        {
+          ...buildIncidentCard(row, Date.now()),
+          position: Cesium.Cartesian3.fromDegrees(anchor.lon, anchor.lat),
+        },
+      ],
+      { cohortLimit: 1, collisionCapacity: 1, moving: false },
+    );
+  }
+
+  /** Resolve a scene pick to one of this layer's incident ids, or null. */
+  function pickedIncidentId(picked) {
+    const pickId = picking.resolvePickId(picked);
+    if (typeof pickId !== 'string' || !pickId.startsWith(PICK_PREFIX))
+      return null;
+    const incidentId = pickId.slice(PICK_PREFIX.length).split(':')[0];
+    return _rowById.has(incidentId) ? incidentId : null;
+  }
+
+  function installClickHandler() {
+    if (!canSelect() || _clickHandler || !_viewer) return;
+    picking.registerPickOwner(layer.id, (pickId) =>
+      String(pickId).startsWith(PICK_PREFIX),
+    );
+    _clickHandler = screenSpaceEventHandlerFactory(_viewer);
+    _clickHandler.setInputAction((click) => {
+      if (pointer && !pointer.isPointerFree()) return;
+      const picked = _viewer.scene.pick(click.position);
+      const incidentId = picked ? pickedIncidentId(picked) : null;
+      if (incidentId) {
+        _selectedId = incidentId;
+        publishSelectedCard();
+        return;
+      }
+      // A pick that belongs to a sibling layer (e.g. an aircraft) is not
+      // "empty space" — leave the selection alone and let that layer handle it.
+      if (picked) {
+        const pickId = picking.resolvePickId(picked);
+        if (pickId && picking.isOwnedByOtherLayer(layer.id, pickId)) return;
+      }
+      if (_selectedId) {
+        _selectedId = null;
+        publishSelectedCard();
+      }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+  }
+
+  function removeClickHandler() {
+    if (!canSelect()) return;
+    picking.unregisterPickOwner(layer.id);
+    if (_clickHandler) {
+      _clickHandler.destroy();
+      _clickHandler = null;
+    }
+  }
+
+  function clearSelection() {
+    _selectedId = null;
+    if (overlayHost) {
+      overlayHost.clearSource(PERIMETER_OVERLAY_SOURCE_ID);
+      overlayHost.setVisible?.(PERIMETER_OVERLAY_SOURCE_ID, false);
+    }
+  }
 
   const layer = {
     id: 'fire-perimeters',
@@ -50,6 +149,8 @@ export function createFirePerimetersLayer({ source } = {}) {
     enable() {
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
+      overlayHost?.setVisible?.(PERIMETER_OVERLAY_SOURCE_ID, true);
+      installClickHandler();
     },
 
     disable() {
@@ -57,6 +158,8 @@ export function createFirePerimetersLayer({ source } = {}) {
       _request = null;
       _enabled = false;
       if (_dataSource) _dataSource.show = false;
+      removeClickHandler();
+      clearSelection();
     },
 
     async update() {
@@ -116,6 +219,10 @@ export function createFirePerimetersLayer({ source } = {}) {
 
         _dataSource.entities.removeAll();
         for (const entity of nextEntities) _dataSource.entities.add(entity);
+        _rowById.clear();
+        for (const row of rows) _rowById.set(row.stableId, row);
+        // Refresh (or drop) the selected incident's card against the new feed.
+        if (_selectedId) publishSelectedCard();
         _count = rows.length;
         _lastUpdate = Date.now();
         _lastError = null;
@@ -137,6 +244,9 @@ export function createFirePerimetersLayer({ source } = {}) {
     destroy(viewer = _viewer) {
       _request?.abort();
       _request = null;
+      removeClickHandler();
+      clearSelection();
+      _rowById.clear();
       _viewer = null;
       _enabled = false;
       if (_dataSource) {

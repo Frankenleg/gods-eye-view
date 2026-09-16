@@ -2,9 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createFirePerimetersLayer } from './index.js';
 
-function harness(source) {
+function harness(source, { pick = () => null } = {}) {
   const sources = [];
+  const overlay = { entries: new Map(), visible: null };
+  const clicks = { handler: null, destroyed: 0 };
+  const owners = new Map();
   const viewer = {
+    scene: { pick },
     dataSources: {
       add(value) {
         sources.push(value);
@@ -14,10 +18,40 @@ function harness(source) {
       },
     },
   };
-  const layer = createFirePerimetersLayer({ source });
+  const layer = createFirePerimetersLayer({
+    source,
+    overlayHost: {
+      setEntries(sourceId, entries) {
+        overlay.entries.set(sourceId, entries);
+      },
+      setVisible(sourceId, visible) {
+        overlay.visible = visible;
+      },
+      clearSource(sourceId) {
+        overlay.entries.delete(sourceId);
+      },
+    },
+    screenSpaceEventHandlerFactory: () => ({
+      setInputAction(callback) {
+        clicks.handler = callback;
+      },
+      destroy() {
+        clicks.destroyed += 1;
+        clicks.handler = null;
+      },
+    }),
+    picking: {
+      resolvePickId: (picked) => picked?.id ?? null,
+      isOwnedByOtherLayer: (layerId, pickedId) =>
+        String(pickedId).startsWith('other-layer:'),
+      registerPickOwner: (layerId, predicate) => owners.set(layerId, predicate),
+      unregisterPickOwner: (layerId) => owners.delete(layerId),
+    },
+    pointer: { isPointerFree: () => true },
+  });
   layer.init(viewer);
   layer.enable(viewer);
-  return { layer, viewer, sources };
+  return { layer, viewer, sources, overlay, clicks, owners };
 }
 
 const ring = [
@@ -73,6 +107,66 @@ test('late refresh cannot publish after disable or destroy', async () => {
     assert.equal(h.layer.getStats().count, 0);
     h.layer.destroy(h.viewer);
   }
+});
+
+test('clicking a perimeter publishes its incident card; empty space clears it', async () => {
+  let pickResult = null;
+  const h = harness({ getSnapshot: async () => [row] }, {
+    pick: () => pickResult,
+  });
+  await h.layer.update(h.viewer);
+  assert.equal(typeof h.clicks.handler, 'function', 'click handler missing');
+  assert.equal(
+    h.owners.get('fire-perimeters')('fire-perimeter:2026-NMGNF-000123:0'),
+    true,
+  );
+
+  pickResult = { id: 'fire-perimeter:2026-NMGNF-000123:0' };
+  h.clicks.handler({ position: { x: 10, y: 10 } });
+  const entries = h.overlay.entries.get('fire-perimeters');
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].id, 'fire-perimeter-card:2026-NMGNF-000123');
+  assert.equal(entries[0].title, 'FIRE · Fixture Fire');
+  assert.ok(entries[0].position, 'card must carry a world anchor');
+
+  pickResult = { id: 'other-layer:aircraft-1' };
+  h.clicks.handler({ position: { x: 10, y: 10 } });
+  assert.equal(
+    h.overlay.entries.get('fire-perimeters')?.length,
+    1,
+    'sibling-layer picks must not clear the selection',
+  );
+
+  pickResult = null;
+  h.clicks.handler({ position: { x: 10, y: 10 } });
+  assert.equal(h.overlay.entries.get('fire-perimeters')?.length ?? 0, 0);
+});
+
+test('disable removes the click handler, pick ownership, and any card', async () => {
+  const h = harness(
+    { getSnapshot: async () => [row] },
+    { pick: () => ({ id: 'fire-perimeter:2026-NMGNF-000123:0' }) },
+  );
+  await h.layer.update(h.viewer);
+  h.clicks.handler({ position: { x: 10, y: 10 } });
+  h.layer.disable(h.viewer);
+  assert.equal(h.clicks.destroyed, 1);
+  assert.equal(h.owners.has('fire-perimeters'), false);
+  assert.equal(h.overlay.entries.has('fire-perimeters'), false);
+});
+
+test('a refresh that drops the selected incident also drops its card', async () => {
+  let rows = [row];
+  const h = harness(
+    { getSnapshot: async () => rows },
+    { pick: () => ({ id: 'fire-perimeter:2026-NMGNF-000123:0' }) },
+  );
+  await h.layer.update(h.viewer);
+  h.clicks.handler({ position: { x: 10, y: 10 } });
+  assert.equal(h.overlay.entries.get('fire-perimeters').length, 1);
+  rows = [{ ...row, stableId: 'different' }];
+  await h.layer.update(h.viewer);
+  assert.equal(h.overlay.entries.get('fire-perimeters')?.length ?? 0, 0);
 });
 
 test('analyst records expose incident facts without geometry payloads', async () => {

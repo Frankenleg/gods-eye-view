@@ -1717,6 +1717,7 @@
       "src/layers/perimeters/index.js",
       "src/layers/perimeters/source.js",
       "src/layers/perimeters/records.js",
+      "src/layers/perimeters/cards.js",
       "src/layers/cctv/sourcePolicy.js",
       "src/sources/reference.js",
       "src/search/nominatim.js",
@@ -2150,6 +2151,7 @@
       "src/layers/perimeters/index.js",
       "src/layers/perimeters/source.js",
       "src/layers/perimeters/records.js",
+      "src/layers/perimeters/cards.js",
       "src/layers/cctv/sourcePolicy.js",
       "src/search/nominatim.js",
       "src/nominatimGeocode.js",
@@ -2685,7 +2687,8 @@
     "modules": [
       "src/layers/perimeters/index.js",
       "src/layers/perimeters/source.js",
-      "src/layers/perimeters/records.js"
+      "src/layers/perimeters/records.js",
+      "src/layers/perimeters/cards.js"
     ],
     "external": ["cesium"]
   },
