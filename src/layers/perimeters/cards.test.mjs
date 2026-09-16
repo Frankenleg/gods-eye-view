@@ -52,7 +52,6 @@ test('a full incident row renders name, size, containment, and ages', () => {
     'discovered 1d ago · updated 2h ago',
   ]);
   assert.equal(card.selected, true);
-  assert.equal(card.actionable, true);
   assert.equal(typeof card.accent, 'string');
 });
 
@@ -78,6 +77,134 @@ test('missing attributes degrade to available facts instead of placeholders', ()
   );
   assert.equal(card.title, 'FIRE · Unnamed incident');
   assert.deepEqual(card.details, ['containment unknown · RX']);
+});
+
+test('a known InciWeb page adds a link line to the card', () => {
+  const card = buildIncidentCard(
+    {
+      stableId: 'x',
+      name: 'Timber',
+      acres: 25426,
+      containedPct: 44,
+      state: 'US-CA',
+      category: 'WF',
+      discoveredTime: null,
+      updatedTime: null,
+      cause: null,
+      behavior: null,
+      personnel: null,
+      county: null,
+      costToDate: null,
+      complexity: null,
+    },
+    1758000000000,
+    { link: 'https://inciweb.wildfire.gov/incident-information/calpf-timber-fire' },
+  );
+  assert.equal(card.details.at(-1), 'InciWeb ↗ · click card to open');
+  assert.equal(card.interactive, true);
+  assert.match(card.accessibilityLabel, /InciWeb/);
+});
+
+test('the selected card claims the selected paint lane, not the ambient lane', () => {
+  const card = buildIncidentCard(
+    {
+      stableId: 'x',
+      name: 'Any',
+      acres: 1,
+      containedPct: 1,
+      state: 'US-NM',
+      category: 'WF',
+      discoveredTime: null,
+      updatedTime: null,
+      cause: null,
+      behavior: null,
+      personnel: null,
+      county: null,
+      costToDate: null,
+      complexity: null,
+      complexName: null,
+    },
+    1758000000000,
+  );
+  assert.equal(card.selected, true);
+  // An explicit paintLane would override `selected` in the overlay host's
+  // lane resolver and push the card under other selected cards.
+  assert.equal('paintLane' in card, false);
+  assert.equal('collisionGroup' in card, false);
+});
+
+test('costs near a unit boundary promote to the larger unit', () => {
+  const base = {
+    stableId: 'x',
+    name: 'Any',
+    acres: null,
+    containedPct: null,
+    state: null,
+    category: null,
+    discoveredTime: null,
+    updatedTime: null,
+    cause: null,
+    behavior: null,
+    personnel: null,
+    county: null,
+    complexity: null,
+    complexName: null,
+  };
+  const costLine = (costToDate) =>
+    buildIncidentCard({ ...base, costToDate }, 0).details.find((line) =>
+      line.includes('to date'),
+    );
+  assert.equal(costLine(999500), '$1M to date');
+  assert.equal(costLine(999499), '$999K to date');
+  assert.equal(costLine(999600000), '$1B to date');
+  assert.equal(costLine(4200000), '$4.2M to date');
+});
+
+test('a complex member names its complex on the card', () => {
+  const card = buildIncidentCard(
+    {
+      stableId: 'x',
+      name: 'Crosswhite',
+      acres: 342923,
+      containedPct: 99,
+      state: 'US-OR',
+      category: 'WF',
+      discoveredTime: null,
+      updatedTime: null,
+      cause: null,
+      behavior: null,
+      personnel: null,
+      county: null,
+      costToDate: null,
+      complexity: null,
+      complexName: 'ROWE CREEK COMPLEX',
+    },
+    1758000000000,
+  );
+  assert.ok(card.details.includes('part of Rowe Creek Complex'));
+});
+
+test('a card without a link is not interactive', () => {
+  const card = buildIncidentCard(
+    {
+      stableId: 'x',
+      name: 'Crosswhite',
+      acres: 1,
+      containedPct: 1,
+      state: 'US-OR',
+      category: 'WF',
+      discoveredTime: null,
+      updatedTime: null,
+      cause: null,
+      behavior: null,
+      personnel: null,
+      county: null,
+      costToDate: null,
+      complexity: null,
+    },
+    1758000000000,
+  );
+  assert.equal(card.interactive, false);
 });
 
 test('partial incident details render only the facts that exist', () => {

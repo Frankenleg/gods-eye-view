@@ -3,24 +3,36 @@ import {
   PERIMETER_OVERLAY_SOURCE_ID,
   perimeterAnchorDegrees,
   buildIncidentCard,
+  containmentAccent,
 } from './cards.js';
+import {
+  findInciwebLink,
+  inciwebNodeId,
+  isCurrentPublication,
+} from './inciweb.js';
 export { normalizeFirePerimeterSnapshot } from './records.js';
 export { createWfigsPerimeterSource } from './source.js';
 export * from './cards.js';
+export * from './inciweb.js';
 
-/** Fill/line color for a perimeter by containment progress. */
+/** Fill/line color for a perimeter by containment progress (same ramp as the card accent). */
 export function containmentColor(containedPct) {
-  if (!Number.isFinite(containedPct) || containedPct <= 0)
-    return Cesium.Color.fromCssColorString('#ff3b30');
-  if (containedPct < 50) return Cesium.Color.fromCssColorString('#ff7a00');
-  if (containedPct < 100) return Cesium.Color.fromCssColorString('#ffb300');
-  return Cesium.Color.fromCssColorString('#8bc34a');
+  return Cesium.Color.fromCssColorString(containmentAccent(containedPct));
 }
 
 const ringPositions = (ring) =>
   ring.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat));
 
 const PICK_PREFIX = 'fire-perimeter:';
+const CARD_HOST_OPTIONS = Object.freeze({
+  cohortLimit: 1,
+  collisionCapacity: 1,
+  moving: false,
+});
+// The InciWeb catalog changes on the order of days; refreshing it on the
+// 5-minute perimeter cadence would hammer a public .gov endpoint for ~200 KB
+// of near-identical bytes.
+const INCIWEB_INDEX_TTL_MS = 6 * 3600000;
 
 /** Own one fire-perimeter display, its refresh lifecycle, and click selection. */
 export function createFirePerimetersLayer({
@@ -29,6 +41,9 @@ export function createFirePerimetersLayer({
   screenSpaceEventHandlerFactory = null,
   picking = null,
   pointer = null,
+  inciwebSource = null,
+  inciwebPublications = null,
+  openExternal = null,
 } = {}) {
   if (typeof source?.getSnapshot !== 'function')
     throw new TypeError('Fire perimeters require a snapshot source');
@@ -41,33 +56,110 @@ export function createFirePerimetersLayer({
   let _enabled = false;
   let _clickHandler = null;
   let _selectedId = null;
+  let _selectedLink = null;
+  let _selectedCardId = null;
+  let _inciwebIndex = [];
+  let _indexFetchedAt = 0;
+  let _indexFetchInFlight = false;
+  /** @type {Map<string, {stableId: string, anchor: {lon: number, lat: number}}>} */
   const _rowById = new Map();
+  // Link → currency verdict from the publication check; unknown links are
+  // absent. Failed checks are not cached so a transient outage retries.
+  const _linkVerdicts = new Map();
+  const _verdictsInFlight = new Set();
 
   const canSelect = () =>
     overlayHost && screenSpaceEventHandlerFactory && picking;
+
+  /**
+   * Refresh the InciWeb catalog off the render path: a hanging or failed
+   * fetch only costs the link line, never the perimeter refresh — the
+   * catalog is consumed solely by the selected card.
+   */
+  function refreshInciwebIndex(signal) {
+    if (!inciwebSource || _indexFetchInFlight) return;
+    if (Date.now() - _indexFetchedAt < INCIWEB_INDEX_TTL_MS) return;
+    _indexFetchInFlight = true;
+    inciwebSource
+      .getIndex({ signal })
+      .then((rows) => {
+        if (!Array.isArray(rows)) return;
+        _inciwebIndex = rows;
+        _indexFetchedAt = Date.now();
+        if (_selectedId) publishSelectedCard();
+      })
+      .catch(() => {
+        // Catalog unavailable — cards stay linkless until the next attempt.
+      })
+      .finally(() => {
+        _indexFetchInFlight = false;
+      });
+  }
+
+  /**
+   * Verify that a matched publication describes the current incident, not
+   * an archived same-name fire — the catalog is all-time. Async: the card
+   * republishes with the link once (and only if) the check passes.
+   */
+  function verifyLink(link, row) {
+    const id = inciwebNodeId(link);
+    if (!id || !inciwebPublications || _verdictsInFlight.has(link)) return;
+    _verdictsInFlight.add(link);
+    inciwebPublications
+      .getPublication(id)
+      .then((publication) => {
+        _linkVerdicts.set(
+          link,
+          isCurrentPublication(publication, {
+            discoveredTime: row.discoveredTime,
+          }),
+        );
+        if (_selectedId === row.stableId) publishSelectedCard();
+      })
+      .catch(() => {
+        // Fail closed without caching: no link now, retry on reselection.
+      })
+      .finally(() => {
+        _verdictsInFlight.delete(link);
+      });
+  }
 
   function publishSelectedCard() {
     if (!canSelect()) return;
     const row = _selectedId ? _rowById.get(_selectedId) : null;
     if (!row) {
       _selectedId = null;
-      overlayHost.setEntries(PERIMETER_OVERLAY_SOURCE_ID, [], {
-        cohortLimit: 1,
-        collisionCapacity: 1,
-        moving: false,
-      });
+      _selectedLink = null;
+      _selectedCardId = null;
+      overlayHost.setEntries(
+        PERIMETER_OVERLAY_SOURCE_ID,
+        [],
+        CARD_HOST_OPTIONS,
+      );
       return;
     }
-    const anchor = perimeterAnchorDegrees(row.polygons);
+    const candidate = findInciwebLink(_inciwebIndex, row);
+    if (candidate && !_linkVerdicts.has(candidate)) verifyLink(candidate, row);
+    _selectedLink =
+      candidate && _linkVerdicts.get(candidate) === true ? candidate : null;
+    const card = {
+      ...buildIncidentCard(row, Date.now(), { link: _selectedLink }),
+      position: Cesium.Cartesian3.fromDegrees(row.anchor.lon, row.anchor.lat),
+    };
+    if (!openExternal) card.interactive = false;
+    if (_selectedLink && openExternal) {
+      const link = _selectedLink;
+      // Keyboard/assistive activation mirrors the pointer click-through.
+      card.activate = () => {
+        openExternal(link);
+        return true;
+      };
+    }
+    _selectedCardId = card.id;
     overlayHost.setEntries(
       PERIMETER_OVERLAY_SOURCE_ID,
-      [
-        {
-          ...buildIncidentCard(row, Date.now()),
-          position: Cesium.Cartesian3.fromDegrees(anchor.lon, anchor.lat),
-        },
-      ],
-      { cohortLimit: 1, collisionCapacity: 1, moving: false },
+      [card],
+      CARD_HOST_OPTIONS,
     );
   }
 
@@ -82,12 +174,25 @@ export function createFirePerimetersLayer({
 
   function installClickHandler() {
     if (!canSelect() || _clickHandler || !_viewer) return;
-    picking.registerPickOwner(layer.id, (pickId) =>
-      String(pickId).startsWith(PICK_PREFIX),
-    );
+    // Deliberately NOT registered in the pick-ownership registry: sibling
+    // layers yield to owned picks before their own overlay-card hit-tests,
+    // so claiming these large ground polygons would make FIRMS/vessel/CCTV
+    // cards inert anywhere over a perimeter. Unowned, our picks read as
+    // "empty space" to siblings — the pre-existing behavior for the globe.
     _clickHandler = screenSpaceEventHandlerFactory(_viewer);
     _clickHandler.setInputAction((click) => {
       if (pointer && !pointer.isPointerFree()) return;
+      // A click on the incident card itself opens its InciWeb page (when the
+      // incident has one) and never disturbs the selection.
+      const cardHit = overlayHost.hitTest?.(
+        click.position?.x,
+        click.position?.y,
+        { sourceId: PERIMETER_OVERLAY_SOURCE_ID },
+      );
+      if (cardHit && cardHit.entryId === _selectedCardId) {
+        if (_selectedLink && openExternal) openExternal(_selectedLink);
+        return;
+      }
       const picked = _viewer.scene.pick(click.position);
       const incidentId = picked ? pickedIncidentId(picked) : null;
       if (incidentId) {
@@ -109,8 +214,6 @@ export function createFirePerimetersLayer({
   }
 
   function removeClickHandler() {
-    if (!canSelect()) return;
-    picking.unregisterPickOwner(layer.id);
     if (_clickHandler) {
       _clickHandler.destroy();
       _clickHandler = null;
@@ -119,6 +222,8 @@ export function createFirePerimetersLayer({
 
   function clearSelection() {
     _selectedId = null;
+    _selectedLink = null;
+    _selectedCardId = null;
     if (overlayHost) {
       overlayHost.clearSource(PERIMETER_OVERLAY_SOURCE_ID);
       overlayHost.setVisible?.(PERIMETER_OVERLAY_SOURCE_ID, false);
@@ -167,37 +272,25 @@ export function createFirePerimetersLayer({
       _request?.abort();
       const request = new AbortController();
       _request = request;
+      refreshInciwebIndex(request.signal);
       try {
         const rows = await source.getSnapshot({ signal: request.signal });
         if (request.signal.aborted || _request !== request || !_enabled)
           return false;
 
         const nextEntities = [];
+        _rowById.clear();
         for (const row of rows) {
           const color = containmentColor(row.containedPct);
-          const properties = {
-            name: row.name,
-            acres: row.acres,
-            containedPct: row.containedPct,
-            state: row.state,
-            category: row.category,
-            discoveredTime: row.discoveredTime,
-            updatedTime: row.updatedTime,
-            cause: row.cause,
-            behavior: row.behavior,
-            personnel: row.personnel,
-            county: row.county,
-            costToDate: row.costToDate,
-            complexity: row.complexity,
-          };
           for (const [index, rings] of row.polygons.entries()) {
             const [outer, ...holes] = rings;
+            const outerPositions = ringPositions(outer);
             nextEntities.push(
               new Cesium.Entity({
                 id: `fire-perimeter:${row.stableId}:${index}`,
                 polygon: {
                   hierarchy: new Cesium.PolygonHierarchy(
-                    ringPositions(outer),
+                    outerPositions,
                     holes.map(
                       (hole) =>
                         new Cesium.PolygonHierarchy(ringPositions(hole)),
@@ -210,23 +303,28 @@ export function createFirePerimetersLayer({
                 // The fire line: ground-clamped outline (entity polygons cannot
                 // outline clamped geometry themselves).
                 polyline: {
-                  positions: ringPositions(outer),
+                  positions: outerPositions,
                   clampToGround: true,
                   width: 2,
                   material: new Cesium.ColorMaterialProperty(
                     color.withAlpha(0.9),
                   ),
                 },
-                properties,
               }),
             );
           }
+          // Keep a geometry-free projection: the coordinate arrays would
+          // otherwise be retained for the layer's lifetime while only the
+          // anchor is ever read again.
+          const { polygons, ...facts } = row;
+          _rowById.set(row.stableId, {
+            ...facts,
+            anchor: perimeterAnchorDegrees(polygons),
+          });
         }
 
         _dataSource.entities.removeAll();
         for (const entity of nextEntities) _dataSource.entities.add(entity);
-        _rowById.clear();
-        for (const row of rows) _rowById.set(row.stableId, row);
         // Refresh (or drop) the selected incident's card against the new feed.
         if (_selectedId) publishSelectedCard();
         _count = rows.length;
@@ -253,6 +351,9 @@ export function createFirePerimetersLayer({
       removeClickHandler();
       clearSelection();
       _rowById.clear();
+      _inciwebIndex = [];
+      _indexFetchedAt = 0;
+      _linkVerdicts.clear();
       _viewer = null;
       _enabled = false;
       if (_dataSource) {
@@ -264,36 +365,21 @@ export function createFirePerimetersLayer({
       _lastError = null;
     },
 
-    /** Snapshot incident facts (no geometry) for the analyst query engine. */
+    /** Snapshot incident facts (with card-anchor coordinates) for the analyst query engine. */
     getAnalystRecords(maxCount = 2000) {
       if (!_dataSource || !_dataSource.show) return [];
       const limit = Number.isFinite(maxCount)
         ? Math.max(1, Math.floor(maxCount))
         : 2000;
-      const now = Cesium.JulianDate.now();
-      const seen = new Set();
       const result = [];
-      for (const entity of _dataSource.entities.values) {
+      for (const row of _rowById.values()) {
         if (result.length >= limit) break;
-        const incidentId = String(entity.id).split(':')[1] ?? null;
-        if (incidentId == null || seen.has(incidentId)) continue;
-        seen.add(incidentId);
-        const p = entity.properties;
+        const { anchor, stableId, ...facts } = row;
         result.push({
-          id: incidentId,
-          name: p?.name?.getValue(now) ?? null,
-          acres: p?.acres?.getValue(now) ?? null,
-          containedPct: p?.containedPct?.getValue(now) ?? null,
-          state: p?.state?.getValue(now) ?? null,
-          category: p?.category?.getValue(now) ?? null,
-          discoveredTime: p?.discoveredTime?.getValue(now) ?? null,
-          updatedTime: p?.updatedTime?.getValue(now) ?? null,
-          cause: p?.cause?.getValue(now) ?? null,
-          behavior: p?.behavior?.getValue(now) ?? null,
-          personnel: p?.personnel?.getValue(now) ?? null,
-          county: p?.county?.getValue(now) ?? null,
-          costToDate: p?.costToDate?.getValue(now) ?? null,
-          complexity: p?.complexity?.getValue(now) ?? null,
+          id: stableId,
+          ...facts,
+          lat: anchor.lat,
+          lon: anchor.lon,
         });
       }
       return result;

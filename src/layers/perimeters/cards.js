@@ -54,17 +54,28 @@ export function perimeterAnchorDegrees(polygons) {
 function formatCost(dollars) {
   if (!Number.isFinite(dollars) || dollars < 1000) return null;
   const units = [
-    [1e9, 'B'],
-    [1e6, 'M'],
     [1e3, 'K'],
+    [1e6, 'M'],
+    [1e9, 'B'],
   ];
-  for (const [scale, suffix] of units) {
-    if (dollars >= scale) {
-      const value = dollars / scale;
-      return `$${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10}${suffix}`;
+  let index = 0;
+  for (let i = units.length - 1; i >= 0; i--) {
+    if (dollars >= units[i][0]) {
+      index = i;
+      break;
     }
   }
-  return null;
+  // 999,500 must promote to $1M, never render as $1000K.
+  if (dollars >= units[index][0] * 999.5 && index < units.length - 1) index++;
+  const value = dollars / units[index][0];
+  return `$${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10}${units[index][1]}`;
+}
+
+/** WFIGS complex names arrive ALL-CAPS; render them in title case. */
+function titleCase(name) {
+  return String(name)
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
 }
 
 function formatAge(deltaMs) {
@@ -80,9 +91,10 @@ function formatAge(deltaMs) {
  * `position` (Cartesian) separately — this model stays JSON-safe for tests.
  * @param {Object} row - Normalized perimeter row (see records.js).
  * @param {number} nowMs - Current epoch milliseconds.
+ * @param {{link: ?string}} [extras] - Optional InciWeb page for this incident.
  * @returns {Object} World-overlay entry without `position`.
  */
-export function buildIncidentCard(row, nowMs) {
+export function buildIncidentCard(row, nowMs, { link = null } = {}) {
   const facts = [];
   if (Number.isFinite(row.acres))
     facts.push(`${Math.round(row.acres).toLocaleString('en-US')} ac`);
@@ -118,22 +130,26 @@ export function buildIncidentCard(row, nowMs) {
   if (row.updatedTime != null && updated) ages.push(`updated ${updated} ago`);
 
   const details = [facts.join(' · ')];
+  if (row.complexName) details.push(`part of ${titleCase(row.complexName)}`);
   if (situation.length) details.push(situation.join(' · '));
   if (response.length) details.push(response.join(' · '));
   if (ages.length) details.push(ages.join(' · '));
+  if (link) details.push('InciWeb ↗ · click card to open');
 
+  const title = `FIRE · ${row.name || 'Unnamed incident'}`;
   return {
     id: `fire-perimeter-card:${row.stableId}`,
-    actionable: true,
+    // `selected` picks the paint lane and collision protection; an explicit
+    // paintLane would override it in the host's lane resolver.
     selected: true,
-    title: `FIRE · ${row.name || 'Unnamed incident'}`,
+    // Only a linked card is clickable — the overlay host registers hit
+    // rectangles solely for interactive entries.
+    interactive: Boolean(link),
+    ...(link ? { accessibilityLabel: `Open ${title} on InciWeb` } : undefined),
+    title,
     details,
     accent: containmentAccent(row.containedPct),
     priority: Number.MAX_SAFE_INTEGER,
-    collisionGroup: 'ambient-label',
-    paintLane: 'ambient-label',
-    horizonCull: true,
-    terrainOcclusion: false,
     gapPx: 15,
     verticalOnly: true,
     placement: 'above',

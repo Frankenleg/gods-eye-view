@@ -32,6 +32,37 @@ test('a successful response yields normalized perimeter rows', async () => {
   assert.match(requested, /f=geojson/);
 });
 
+test('a truncated response pages until the feed is complete', async () => {
+  const pageRing = (id) => ({
+    id,
+    geometry: { type: 'Polygon', coordinates: [ring] },
+    properties: { attr_UniqueFireIdentifier: `fire-${id}` },
+  });
+  const requests = [];
+  const source = createWfigsPerimeterSource({
+    fetchImpl: async (url) => {
+      requests.push(new URL(String(url)).searchParams.get('resultOffset'));
+      const page = requests.length;
+      return {
+        ok: true,
+        json: async () =>
+          page < 3
+            ? {
+                features: [pageRing(page)],
+                properties: { exceededTransferLimit: true },
+              }
+            : { features: [pageRing(page)] },
+      };
+    },
+  });
+  const rows = await source.getSnapshot();
+  assert.deepEqual(
+    rows.map((row) => row.stableId),
+    ['fire-1', 'fire-2', 'fire-3'],
+  );
+  assert.deepEqual(requests, [null, '1', '2']);
+});
+
 test('an upstream failure surfaces its HTTP status', async () => {
   const source = createWfigsPerimeterSource({
     fetchImpl: async () => ({ ok: false, status: 503 }),

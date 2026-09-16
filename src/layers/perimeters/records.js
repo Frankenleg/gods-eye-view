@@ -1,4 +1,10 @@
-/** Validate a complete WFIGS feed before replacing the last good perimeter snapshot. */
+/**
+ * Normalize a WFIGS feed, skipping individually invalid features.
+ * Only a payload that is not a feature collection at all rejects the whole
+ * snapshot: a single degenerate incident (ArcGIS emits geometry:null when
+ * maxAllowableOffset generalizes a tiny polygon away) must never blank the
+ * layer — a failed first update makes the lifecycle disable it entirely.
+ */
 
 const finiteOrNull = (value) => (Number.isFinite(value) ? value : null);
 const textOrNull = (value) => (typeof value === 'string' ? value : null);
@@ -44,10 +50,9 @@ export function normalizeFirePerimeterSnapshot(geojson) {
       typeof properties !== 'object' ||
       Array.isArray(properties)
     )
-      return null;
+      continue;
     const polygons = normalizePolygons(feature.geometry);
-    if (polygons === null) return null;
-    if (!polygons.length) continue;
+    if (polygons === null || !polygons.length) continue;
     const uniqueId = properties.attr_UniqueFireIdentifier;
     const stableId =
       typeof uniqueId === 'string' && uniqueId !== ''
@@ -55,7 +60,7 @@ export function normalizeFirePerimeterSnapshot(geojson) {
         : feature.id == null || feature.id === ''
           ? null
           : String(feature.id);
-    if (stableId == null || ids.has(stableId)) return null;
+    if (stableId == null || ids.has(stableId)) continue;
     ids.add(stableId);
     rows.push({
       stableId,
@@ -81,6 +86,7 @@ export function normalizeFirePerimeterSnapshot(geojson) {
       county: textOrNull(properties.attr_POOCounty),
       costToDate: finiteOrNull(properties.attr_EstimatedCostToDate),
       complexity: textOrNull(properties.attr_IncidentComplexityLevel),
+      complexName: textOrNull(properties.attr_CpxName),
       polygons,
     });
   }

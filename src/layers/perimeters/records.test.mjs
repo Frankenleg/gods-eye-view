@@ -28,6 +28,7 @@ function feature(overrides = {}) {
       attr_POOCounty: 'Sandoval',
       attr_EstimatedCostToDate: 4200000,
       attr_IncidentComplexityLevel: 'Type 3 Incident',
+      attr_CpxName: 'ROWE CREEK COMPLEX',
       ...overrides.properties,
     },
     ...overrides,
@@ -64,6 +65,7 @@ test('a valid snapshot yields one row per incident with polygons preserved', () 
     county: 'Sandoval',
     costToDate: 4200000,
     complexity: 'Type 3 Incident',
+    complexName: 'ROWE CREEK COMPLEX',
     polygons: [[ring]],
   });
   assert.equal(rows[1].polygons.length, 2);
@@ -96,6 +98,7 @@ test('optional attributes normalize to null rather than leaking undefined', () =
           attr_POOCounty: null,
           attr_EstimatedCostToDate: null,
           attr_IncidentComplexityLevel: null,
+          attr_CpxName: null,
         },
       }),
     ],
@@ -115,6 +118,7 @@ test('optional attributes normalize to null rather than leaking undefined', () =
       county: rows[0].county,
       costToDate: rows[0].costToDate,
       complexity: rows[0].complexity,
+      complexName: rows[0].complexName,
     },
     {
       name: null,
@@ -130,39 +134,61 @@ test('optional attributes normalize to null rather than leaking undefined', () =
       county: null,
       costToDate: null,
       complexity: null,
+      complexName: null,
     },
   );
 });
 
-test('a malformed feed is rejected as a whole rather than partially accepted', () => {
-  for (const payload of [
-    null,
-    {},
-    { features: null },
-    { features: [feature({ geometry: null })] },
-    { features: [feature({ geometry: { type: 'Point', coordinates: [0, 1] } })] },
-    {
-      features: [
-        feature({
-          geometry: {
-            type: 'Polygon',
-            coordinates: [[[Infinity, 35.2], ...ring.slice(1)]],
-          },
-        }),
-      ],
-    },
-    {
-      features: [
-        feature({
-          geometry: { type: 'Polygon', coordinates: [[[-200, 35.2], ...ring.slice(1)]] },
-        }),
-      ],
-    },
-    { features: [feature({ geometry: { type: 'Polygon', coordinates: [ring.slice(0, 2)] } })] },
-    { features: [feature(), feature()] },
-  ]) {
+test('a feed that is not a feature collection is rejected as a whole', () => {
+  for (const payload of [null, {}, { features: null }, { features: {} }]) {
     assert.equal(normalizeFirePerimeterSnapshot(payload), null);
   }
+});
+
+test('an invalid feature is skipped so one bad incident cannot blank the layer', () => {
+  const good = feature({
+    id: 2,
+    properties: { attr_UniqueFireIdentifier: 'good' },
+  });
+  for (const bad of [
+    feature({ geometry: null }),
+    feature({ geometry: { type: 'Point', coordinates: [0, 1] } }),
+    feature({
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[[Infinity, 35.2], ...ring.slice(1)]],
+      },
+    }),
+    feature({
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[[-200, 35.2], ...ring.slice(1)]],
+      },
+    }),
+    feature({ geometry: { type: 'Polygon', coordinates: [ring.slice(0, 2)] } }),
+    feature({ properties: null }),
+    feature({ id: null, properties: { attr_UniqueFireIdentifier: null } }),
+  ]) {
+    const rows = normalizeFirePerimeterSnapshot({ features: [bad, good] });
+    assert.equal(rows.length, 1, 'bad feature must be skipped, not fatal');
+    assert.equal(rows[0].stableId, 'good');
+  }
+});
+
+test('a duplicate incident id keeps the first occurrence and skips the rest', () => {
+  const rows = normalizeFirePerimeterSnapshot({
+    features: [
+      feature(),
+      feature({
+        properties: {
+          attr_UniqueFireIdentifier: '2026-NMGNF-000123',
+          attr_IncidentSize: 999,
+        },
+      }),
+    ],
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].acres, 512.5);
 });
 
 test('a perimeter with no rings is skipped rather than rendered empty', () => {
