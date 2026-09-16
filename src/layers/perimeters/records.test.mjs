@@ -73,9 +73,7 @@ test('a valid snapshot yields one row per incident with polygons preserved', () 
 
 test('a missing unique fire identifier falls back to the feature id', () => {
   const rows = normalizeFirePerimeterSnapshot({
-    features: [
-      feature({ properties: { attr_UniqueFireIdentifier: null } }),
-    ],
+    features: [feature({ properties: { attr_UniqueFireIdentifier: null } })],
   });
   assert.equal(rows[0].stableId, '1');
 });

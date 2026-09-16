@@ -99,7 +99,10 @@ const row = {
 
 test('each perimeter polygon renders as one filled entity with its fire line', async () => {
   const h = harness({
-    getSnapshot: async () => [row, { ...row, stableId: 'other', polygons: [[ring], [ring]] }],
+    getSnapshot: async () => [
+      row,
+      { ...row, stableId: 'other', polygons: [[ring], [ring]] },
+    ],
   });
   assert.equal(await h.layer.update(h.viewer), true);
   const entities = h.sources[0].entities.values;
@@ -136,9 +139,12 @@ test('late refresh cannot publish after disable or destroy', async () => {
 
 test('clicking a perimeter publishes its incident card; empty space clears it', async () => {
   let pickResult = null;
-  const h = harness({ getSnapshot: async () => [row] }, {
-    pick: () => pickResult,
-  });
+  const h = harness(
+    { getSnapshot: async () => [row] },
+    {
+      pick: () => pickResult,
+    },
+  );
   await h.layer.update(h.viewer);
   assert.equal(typeof h.clicks.handler, 'function', 'click handler missing');
   // Deliberately NOT registered as a pick owner: sibling layers' click
@@ -286,11 +292,18 @@ test('a complex member resolves to its complex page from the catalog', async () 
 
 test('a stale or unverifiable publication yields no link', async () => {
   const inciwebIndex = [
-    { incident_id: '100', tau: 'NMGNF Fixture Fire', incident_title: 'Fixture Fire' },
+    {
+      incident_id: '100',
+      tau: 'NMGNF Fixture Fire',
+      incident_title: 'Fixture Fire',
+    },
   ];
   for (const publication of [
     // Created two years before this fire's discovery: an archived page.
-    async () => ({ createdMs: 1757900000000 - 700 * 86400000, changedMs: null }),
+    async () => ({
+      createdMs: 1757900000000 - 700 * 86400000,
+      changedMs: null,
+    }),
     // Validation endpoint down: fail closed, no link.
     async () => {
       throw new Error('InciWeb HTTP 503');
@@ -319,10 +332,7 @@ test('a stale or unverifiable publication yields no link', async () => {
 });
 
 test('a hanging InciWeb index fetch never blocks the perimeter refresh', async () => {
-  const h = harness(
-    { getSnapshot: async () => [row] },
-    { inciwebIndex: null },
-  );
+  const h = harness({ getSnapshot: async () => [row] }, { inciwebIndex: null });
   // Replace the index source with one that never resolves.
   h.layer.destroy(h.viewer);
   const hanging = harness({ getSnapshot: async () => [row] });
@@ -337,8 +347,16 @@ test('a hanging InciWeb index fetch never blocks the perimeter refresh', async (
   };
   const layer = createFirePerimetersLayer({
     source: { getSnapshot: async () => [row] },
-    overlayHost: { setEntries() {}, setVisible() {}, clearSource() {}, hitTest: () => null },
-    screenSpaceEventHandlerFactory: () => ({ setInputAction() {}, destroy() {} }),
+    overlayHost: {
+      setEntries() {},
+      setVisible() {},
+      clearSource() {},
+      hitTest: () => null,
+    },
+    screenSpaceEventHandlerFactory: () => ({
+      setInputAction() {},
+      destroy() {},
+    }),
     picking: {
       resolvePickId: () => null,
       isOwnedByOtherLayer: () => false,
@@ -347,7 +365,9 @@ test('a hanging InciWeb index fetch never blocks the perimeter refresh', async (
     },
     pointer: { isPointerFree: () => true },
     inciwebSource: { getIndex: () => new Promise(() => {}) },
-    inciwebPublications: { getPublication: async () => ({ createdMs: 1, changedMs: 1 }) },
+    inciwebPublications: {
+      getPublication: async () => ({ createdMs: 1, changedMs: 1 }),
+    },
     openExternal: () => {},
   });
   layer.init(viewer);

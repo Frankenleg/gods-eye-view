@@ -20,8 +20,16 @@ const catalog = [
     tau: 'SDBKF Coyote Flats Fire',
     incident_title: 'Coyote Flats Fire',
   },
-  { incident_id: '328922', tau: 'OR95S Coyote Fire', incident_title: 'Coyote Fire' },
-  { incident_id: '329195', tau: 'ORBUD Second Flat', incident_title: 'Second Flat' },
+  {
+    incident_id: '328922',
+    tau: 'OR95S Coyote Fire',
+    incident_title: 'Coyote Fire',
+  },
+  {
+    incident_id: '329195',
+    tau: 'ORBUD Second Flat',
+    incident_title: 'Second Flat',
+  },
   {
     incident_id: '329273',
     tau: 'ORBUD 2026 Coleman Creek',
@@ -32,7 +40,11 @@ const catalog = [
     tau: 'ORPRD Rowe Creek Complex',
     incident_title: 'Rowe Creek Complex',
   },
-  { incident_id: '291765', tau: 'CALPF Timber Fire', incident_title: 'Timber Fire' },
+  {
+    incident_id: '291765',
+    tau: 'CALPF Timber Fire',
+    incident_title: 'Timber Fire',
+  },
 ];
 
 test('incidents resolve by exact normalized title to a node link', () => {
@@ -59,8 +71,14 @@ test('incidents resolve by exact normalized title to a node link', () => {
     resolveInciwebNodeLink(catalog, { name: 'Gobernador', state: 'US-NM' }),
     null,
   );
-  assert.equal(resolveInciwebNodeLink(catalog, { name: 'Nope', state: null }), null);
-  assert.equal(resolveInciwebNodeLink(null, { name: 'Coyote', state: 'US-OR' }), null);
+  assert.equal(
+    resolveInciwebNodeLink(catalog, { name: 'Nope', state: null }),
+    null,
+  );
+  assert.equal(
+    resolveInciwebNodeLink(null, { name: 'Coyote', state: 'US-OR' }),
+    null,
+  );
 });
 
 test('a unique candidate in the wrong state is rejected, not linked', () => {
@@ -68,9 +86,16 @@ test('a unique candidate in the wrong state is rejected, not linked', () => {
   // must not link to the only "Willow Fire" on file when it's a Montana
   // incident.
   const willow = [
-    { incident_id: '300001', tau: 'MTFNF Willow Fire', incident_title: 'Willow Fire' },
+    {
+      incident_id: '300001',
+      tau: 'MTFNF Willow Fire',
+      incident_title: 'Willow Fire',
+    },
   ];
-  assert.equal(resolveInciwebNodeLink(willow, { name: 'Willow', state: 'US-AZ' }), null);
+  assert.equal(
+    resolveInciwebNodeLink(willow, { name: 'Willow', state: 'US-AZ' }),
+    null,
+  );
   assert.equal(
     resolveInciwebNodeLink(willow, { name: 'Willow', state: 'US-MT' }),
     'https://inciweb.wildfire.gov/node/300001',
@@ -79,8 +104,16 @@ test('a unique candidate in the wrong state is rejected, not linked', () => {
 
 test('ambiguous titles disambiguate by state, then newest id', () => {
   const twoCoyotes = [
-    { incident_id: '100', tau: 'AZASF Coyote Fire', incident_title: 'Coyote Fire' },
-    { incident_id: '328922', tau: 'OR95S Coyote Fire', incident_title: 'Coyote Fire' },
+    {
+      incident_id: '100',
+      tau: 'AZASF Coyote Fire',
+      incident_title: 'Coyote Fire',
+    },
+    {
+      incident_id: '328922',
+      tau: 'OR95S Coyote Fire',
+      incident_title: 'Coyote Fire',
+    },
   ];
   assert.equal(
     resolveInciwebNodeLink(twoCoyotes, { name: 'Coyote', state: 'US-AZ' }),
@@ -91,8 +124,16 @@ test('ambiguous titles disambiguate by state, then newest id', () => {
     null,
   );
   const twoSameState = [
-    { incident_id: '100', tau: 'ORXXX Coyote Fire', incident_title: 'Coyote Fire' },
-    { incident_id: '328922', tau: 'OR95S Coyote Fire', incident_title: 'Coyote Fire' },
+    {
+      incident_id: '100',
+      tau: 'ORXXX Coyote Fire',
+      incident_title: 'Coyote Fire',
+    },
+    {
+      incident_id: '328922',
+      tau: 'OR95S Coyote Fire',
+      incident_title: 'Coyote Fire',
+    },
   ];
   // Same-state duplicates are usually reburns of the same name — newest wins.
   assert.equal(
@@ -120,13 +161,20 @@ test('a complex member falls back to its complex page', () => {
     'https://inciweb.wildfire.gov/node/291765',
   );
   assert.equal(
-    findInciwebLink(catalog, { name: 'Nope', state: 'US-NM', complexName: null }),
+    findInciwebLink(catalog, {
+      name: 'Nope',
+      state: 'US-NM',
+      complexName: null,
+    }),
     null,
   );
 });
 
 test('a node link exposes its publication id', () => {
-  assert.equal(inciwebNodeId('https://inciweb.wildfire.gov/node/329195'), '329195');
+  assert.equal(
+    inciwebNodeId('https://inciweb.wildfire.gov/node/329195'),
+    '329195',
+  );
   assert.equal(inciwebNodeId('https://example.com/other'), null);
   assert.equal(inciwebNodeId(null), null);
 });
@@ -168,7 +216,10 @@ test('publication currency accepts pages created around or after discovery', () 
   );
   // Unusable timestamps fail closed.
   assert.equal(
-    isCurrentPublication({ createdMs: null, changedMs: null }, { discoveredTime: discovery }),
+    isCurrentPublication(
+      { createdMs: null, changedMs: null },
+      { discoveredTime: discovery },
+    ),
     false,
   );
 });
@@ -188,7 +239,10 @@ test('the publication source fetches timestamps and honors cancellation', async 
     },
   });
   const publication = await source.getPublication('329195');
-  assert.equal(requested, 'https://inciweb.wildfire.gov/api/publication/329195');
+  assert.equal(
+    requested,
+    'https://inciweb.wildfire.gov/api/publication/329195',
+  );
   assert.deepEqual(publication, {
     createdMs: 1785025540000,
     changedMs: 1787589503000,
@@ -217,9 +271,12 @@ test('the publication source fetches timestamps and honors cancellation', async 
       },
     }),
   });
-  await assert.rejects(cancelled.getPublication('1', { signal: abort.signal }), {
-    name: 'AbortError',
-  });
+  await assert.rejects(
+    cancelled.getPublication('1', { signal: abort.signal }),
+    {
+      name: 'AbortError',
+    },
+  );
 });
 
 test('the index source posts an empty title for the full catalog', async () => {

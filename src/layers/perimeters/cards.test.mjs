@@ -98,7 +98,9 @@ test('a known InciWeb page adds a link line to the card', () => {
       complexity: null,
     },
     1758000000000,
-    { link: 'https://inciweb.wildfire.gov/incident-information/calpf-timber-fire' },
+    {
+      link: 'https://inciweb.wildfire.gov/incident-information/calpf-timber-fire',
+    },
   );
   assert.equal(card.details.at(-1), 'InciWeb ↗ · click card to open');
   assert.equal(card.interactive, true);
