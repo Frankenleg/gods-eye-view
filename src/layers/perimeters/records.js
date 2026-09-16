@@ -1,0 +1,81 @@
+/** Validate a complete WFIGS feed before replacing the last good perimeter snapshot. */
+
+const finiteOrNull = (value) => (Number.isFinite(value) ? value : null);
+
+function validRing(ring) {
+  if (!Array.isArray(ring) || ring.length < 4) return false;
+  for (const position of ring) {
+    if (!Array.isArray(position) || position.length < 2) return false;
+    const [lon, lat] = position;
+    if (!Number.isFinite(lon) || Math.abs(lon) > 180) return false;
+    if (!Number.isFinite(lat) || Math.abs(lat) > 90) return false;
+  }
+  return true;
+}
+
+/** Normalize Polygon/MultiPolygon geometry to an array of polygons (each an
+ * array of rings). Returns null on malformed geometry, [] when empty. */
+function normalizePolygons(geometry) {
+  if (!geometry || typeof geometry !== 'object') return null;
+  let polygons;
+  if (geometry.type === 'Polygon') polygons = [geometry.coordinates];
+  else if (geometry.type === 'MultiPolygon') polygons = geometry.coordinates;
+  else return null;
+  if (!Array.isArray(polygons)) return null;
+  const result = [];
+  for (const rings of polygons) {
+    if (!Array.isArray(rings)) return null;
+    if (!rings.length) continue;
+    if (!rings.every(validRing)) return null;
+    result.push(rings);
+  }
+  return result;
+}
+
+export function normalizeFirePerimeterSnapshot(geojson) {
+  if (!Array.isArray(geojson?.features)) return null;
+  const rows = [];
+  const ids = new Set();
+  for (const feature of geojson.features) {
+    const properties = feature?.properties;
+    if (
+      !properties ||
+      typeof properties !== 'object' ||
+      Array.isArray(properties)
+    )
+      return null;
+    const polygons = normalizePolygons(feature.geometry);
+    if (polygons === null) return null;
+    if (!polygons.length) continue;
+    const uniqueId = properties.attr_UniqueFireIdentifier;
+    const stableId =
+      typeof uniqueId === 'string' && uniqueId !== ''
+        ? uniqueId
+        : feature.id == null || feature.id === ''
+          ? null
+          : String(feature.id);
+    if (stableId == null || ids.has(stableId)) return null;
+    ids.add(stableId);
+    rows.push({
+      stableId,
+      name:
+        typeof properties.poly_IncidentName === 'string'
+          ? properties.poly_IncidentName
+          : null,
+      acres: finiteOrNull(properties.attr_IncidentSize),
+      containedPct: finiteOrNull(properties.attr_PercentContained),
+      state:
+        typeof properties.attr_POOState === 'string'
+          ? properties.attr_POOState
+          : null,
+      category:
+        typeof properties.attr_IncidentTypeCategory === 'string'
+          ? properties.attr_IncidentTypeCategory
+          : null,
+      discoveredTime: finiteOrNull(properties.attr_FireDiscoveryDateTime),
+      updatedTime: finiteOrNull(properties.poly_DateCurrent),
+      polygons,
+    });
+  }
+  return rows;
+}
