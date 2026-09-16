@@ -50,6 +50,23 @@ export function perimeterAnchorDegrees(polygons) {
   return { lon: lon / count, lat: lat / count };
 }
 
+/** Compact USD, e.g. $85K / $4.2M / $1.3B. Null under $1,000. */
+function formatCost(dollars) {
+  if (!Number.isFinite(dollars) || dollars < 1000) return null;
+  const units = [
+    [1e9, 'B'],
+    [1e6, 'M'],
+    [1e3, 'K'],
+  ];
+  for (const [scale, suffix] of units) {
+    if (dollars >= scale) {
+      const value = dollars / scale;
+      return `$${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10}${suffix}`;
+    }
+  }
+  return null;
+}
+
 function formatAge(deltaMs) {
   if (!Number.isFinite(deltaMs) || deltaMs < 0) return null;
   const hours = Math.floor(deltaMs / 3600000);
@@ -77,6 +94,22 @@ export function buildIncidentCard(row, nowMs) {
   if (row.state) facts.push(row.state);
   else if (row.category) facts.push(row.category);
 
+  const situation = [];
+  if (row.cause) situation.push(`${row.cause} cause`);
+  if (row.behavior) situation.push(row.behavior);
+  if (row.complexity) situation.push(row.complexity);
+
+  const response = [];
+  if (Number.isFinite(row.personnel))
+    response.push(
+      `${Math.round(row.personnel).toLocaleString('en-US')} personnel`,
+    );
+  if (row.county) response.push(`${row.county} County`);
+  if (Number.isFinite(row.costToDate)) {
+    const cost = formatCost(row.costToDate);
+    if (cost) response.push(`${cost} to date`);
+  }
+
   const ages = [];
   const discovered = formatAge(nowMs - row.discoveredTime);
   if (row.discoveredTime != null && discovered)
@@ -84,14 +117,17 @@ export function buildIncidentCard(row, nowMs) {
   const updated = formatAge(nowMs - row.updatedTime);
   if (row.updatedTime != null && updated) ages.push(`updated ${updated} ago`);
 
+  const details = [facts.join(' · ')];
+  if (situation.length) details.push(situation.join(' · '));
+  if (response.length) details.push(response.join(' · '));
+  if (ages.length) details.push(ages.join(' · '));
+
   return {
     id: `fire-perimeter-card:${row.stableId}`,
     actionable: true,
     selected: true,
     title: `FIRE · ${row.name || 'Unnamed incident'}`,
-    details: ages.length
-      ? [facts.join(' · '), ages.join(' · ')]
-      : [facts.join(' · ')],
+    details,
     accent: containmentAccent(row.containedPct),
     priority: Number.MAX_SAFE_INTEGER,
     collisionGroup: 'ambient-label',

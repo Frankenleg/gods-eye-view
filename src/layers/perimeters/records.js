@@ -1,6 +1,7 @@
 /** Validate a complete WFIGS feed before replacing the last good perimeter snapshot. */
 
 const finiteOrNull = (value) => (Number.isFinite(value) ? value : null);
+const textOrNull = (value) => (typeof value === 'string' ? value : null);
 
 function validRing(ring) {
   if (!Array.isArray(ring) || ring.length < 4) return false;
@@ -74,6 +75,12 @@ export function normalizeFirePerimeterSnapshot(geojson) {
           : null,
       discoveredTime: finiteOrNull(properties.attr_FireDiscoveryDateTime),
       updatedTime: finiteOrNull(properties.poly_DateCurrent),
+      cause: textOrNull(properties.attr_FireCause),
+      behavior: textOrNull(properties.attr_FireBehaviorGeneral),
+      personnel: finiteOrNull(properties.attr_TotalIncidentPersonnel),
+      county: textOrNull(properties.attr_POOCounty),
+      costToDate: finiteOrNull(properties.attr_EstimatedCostToDate),
+      complexity: textOrNull(properties.attr_IncidentComplexityLevel),
       polygons,
     });
   }
