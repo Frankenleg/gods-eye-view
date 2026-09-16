@@ -64,6 +64,29 @@ test('incidents match by name, with the state prefix breaking collisions', () =>
   assert.equal(findInciwebLink(entries, { name: 'Nope', state: 'US-NM' }), null);
 });
 
+test('a complex member falls back to its complex page when its own name has none', () => {
+  const entries = parseInciwebIndex(rss);
+  // Crosswhite has no InciWeb page of its own but is managed under the
+  // Rowe Creek Complex.
+  assert.equal(
+    findInciwebLink(entries, {
+      name: 'Crosswhite',
+      state: 'US-OR',
+      complexName: 'ROWE CREEK COMPLEX',
+    }),
+    'https://inciweb.wildfire.gov/incident-information/orprd-rowe-creek-complex',
+  );
+  // A fire with its own page keeps it even when it belongs to a complex.
+  assert.equal(
+    findInciwebLink(entries, {
+      name: 'Timber',
+      state: 'US-CA',
+      complexName: 'SOME COMPLEX',
+    }),
+    'https://inciweb.wildfire.gov/incident-information/calpf-timber-fire',
+  );
+});
+
 test('an ambiguous name with no state match yields no link rather than a guess', () => {
   const entries = parseInciwebIndex(rss);
   assert.equal(findInciwebLink(entries, { name: 'Coyote', state: 'US-AZ' }), null);

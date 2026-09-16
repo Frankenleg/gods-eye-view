@@ -28,6 +28,7 @@ function feature(overrides = {}) {
       attr_POOCounty: 'Sandoval',
       attr_EstimatedCostToDate: 4200000,
       attr_IncidentComplexityLevel: 'Type 3 Incident',
+      attr_CpxName: 'ROWE CREEK COMPLEX',
       ...overrides.properties,
     },
     ...overrides,
@@ -64,6 +65,7 @@ test('a valid snapshot yields one row per incident with polygons preserved', () 
     county: 'Sandoval',
     costToDate: 4200000,
     complexity: 'Type 3 Incident',
+    complexName: 'ROWE CREEK COMPLEX',
     polygons: [[ring]],
   });
   assert.equal(rows[1].polygons.length, 2);
@@ -96,6 +98,7 @@ test('optional attributes normalize to null rather than leaking undefined', () =
           attr_POOCounty: null,
           attr_EstimatedCostToDate: null,
           attr_IncidentComplexityLevel: null,
+          attr_CpxName: null,
         },
       }),
     ],
@@ -115,6 +118,7 @@ test('optional attributes normalize to null rather than leaking undefined', () =
       county: rows[0].county,
       costToDate: rows[0].costToDate,
       complexity: rows[0].complexity,
+      complexName: rows[0].complexName,
     },
     {
       name: null,
@@ -130,6 +134,7 @@ test('optional attributes normalize to null rather than leaking undefined', () =
       county: null,
       costToDate: null,
       complexity: null,
+      complexName: null,
     },
   );
 });

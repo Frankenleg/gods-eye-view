@@ -81,6 +81,7 @@ export function normalizeFirePerimeterSnapshot(geojson) {
       county: textOrNull(properties.attr_POOCounty),
       costToDate: finiteOrNull(properties.attr_EstimatedCostToDate),
       complexity: textOrNull(properties.attr_IncidentComplexityLevel),
+      complexName: textOrNull(properties.attr_CpxName),
       polygons,
     });
   }

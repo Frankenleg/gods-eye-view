@@ -67,6 +67,13 @@ function formatCost(dollars) {
   return null;
 }
 
+/** WFIGS complex names arrive ALL-CAPS; render them in title case. */
+function titleCase(name) {
+  return String(name)
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
 function formatAge(deltaMs) {
   if (!Number.isFinite(deltaMs) || deltaMs < 0) return null;
   const hours = Math.floor(deltaMs / 3600000);
@@ -119,6 +126,7 @@ export function buildIncidentCard(row, nowMs, { link = null } = {}) {
   if (row.updatedTime != null && updated) ages.push(`updated ${updated} ago`);
 
   const details = [facts.join(' · ')];
+  if (row.complexName) details.push(`part of ${titleCase(row.complexName)}`);
   if (situation.length) details.push(situation.join(' · '));
   if (response.length) details.push(response.join(' · '));
   if (ages.length) details.push(ages.join(' · '));

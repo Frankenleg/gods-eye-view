@@ -41,16 +41,7 @@ export function parseInciwebIndex(rssText) {
   return entries;
 }
 
-/**
- * Resolve one WFIGS incident to its InciWeb page, or null.
- * A unique name match wins outright; an ambiguous name needs the WFIGS
- * origin state (US-XX) to agree with the dispatch unit's state prefix —
- * anything still ambiguous yields null rather than a wrong page.
- * @param {Array} entries - Parsed index.
- * @param {{name: ?string, state: ?string}} incident - WFIGS row facts.
- * @returns {?string} InciWeb URL.
- */
-export function findInciwebLink(entries, { name, state }) {
+function matchByName(entries, name, state) {
   if (!name) return null;
   const wanted = normalizeName(name);
   const candidates = entries.filter((entry) => entry.name === wanted);
@@ -67,6 +58,26 @@ export function findInciwebLink(entries, { name, state }) {
     if (byState.length === 1) return byState[0].link;
   }
   return null;
+}
+
+/**
+ * Resolve one WFIGS incident to its InciWeb page, or null.
+ * The incident's own name is tried first; a member of a complex whose own
+ * name has no page falls back to the complex's page (InciWeb tracks the
+ * managing complex, not each member fire). A unique name match wins
+ * outright; an ambiguous name needs the WFIGS origin state (US-XX) to
+ * agree with the dispatch unit's state prefix — anything still ambiguous
+ * yields null rather than a wrong page.
+ * @param {Array} entries - Parsed index.
+ * @param {{name: ?string, state: ?string, complexName: ?string}} incident
+ *   - WFIGS row facts.
+ * @returns {?string} InciWeb URL.
+ */
+export function findInciwebLink(entries, { name, state, complexName }) {
+  return (
+    matchByName(entries, name, state) ??
+    matchByName(entries, complexName, state)
+  );
 }
 
 /** Fetch and parse the current InciWeb index. */

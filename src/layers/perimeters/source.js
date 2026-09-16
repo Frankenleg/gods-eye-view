@@ -23,6 +23,7 @@ const API_URL =
       'attr_POOCounty',
       'attr_EstimatedCostToDate',
       'attr_IncidentComplexityLevel',
+      'attr_CpxName',
     ].join(','),
     maxAllowableOffset: '0.001',
     outSR: '4326',

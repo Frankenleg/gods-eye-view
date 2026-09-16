@@ -106,6 +106,30 @@ test('a known InciWeb page adds a link line to the card', () => {
   assert.match(card.accessibilityLabel, /InciWeb/);
 });
 
+test('a complex member names its complex on the card', () => {
+  const card = buildIncidentCard(
+    {
+      stableId: 'x',
+      name: 'Crosswhite',
+      acres: 342923,
+      containedPct: 99,
+      state: 'US-OR',
+      category: 'WF',
+      discoveredTime: null,
+      updatedTime: null,
+      cause: null,
+      behavior: null,
+      personnel: null,
+      county: null,
+      costToDate: null,
+      complexity: null,
+      complexName: 'ROWE CREEK COMPLEX',
+    },
+    1758000000000,
+  );
+  assert.ok(card.details.includes('part of Rowe Creek Complex'));
+});
+
 test('a card without a link is not interactive', () => {
   const card = buildIncidentCard(
     {
