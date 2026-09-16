@@ -4,7 +4,15 @@ import { createFirePerimetersLayer } from './index.js';
 
 function harness(
   source,
-  { pick = () => null, inciwebIndex = null, cardHit = () => null } = {},
+  {
+    pick = () => null,
+    inciwebIndex = null,
+    cardHit = () => null,
+    publication = async () => ({
+      createdMs: 1757000000000,
+      changedMs: 1757900000000,
+    }),
+  } = {},
 ) {
   const sources = [];
   const overlay = { entries: new Map(), visible: null };
@@ -56,6 +64,7 @@ function harness(
     inciwebSource: inciwebIndex
       ? { getIndex: async () => inciwebIndex }
       : { getIndex: async () => [] },
+    inciwebPublications: { getPublication: publication },
     openExternal: (url) => opened.push(url),
   });
   layer.init(viewer);
@@ -132,10 +141,11 @@ test('clicking a perimeter publishes its incident card; empty space clears it', 
   });
   await h.layer.update(h.viewer);
   assert.equal(typeof h.clicks.handler, 'function', 'click handler missing');
-  assert.equal(
-    h.owners.get('fire-perimeters')('fire-perimeter:2026-NMGNF-000123:0'),
-    true,
-  );
+  // Deliberately NOT registered as a pick owner: sibling layers' click
+  // handlers yield to owned picks before their own card hit-tests, so
+  // claiming these large ground polygons would make FIRMS/vessel/CCTV
+  // overlay cards inert anywhere over a perimeter.
+  assert.equal(h.owners.size, 0);
 
   pickResult = { id: 'fire-perimeter:2026-NMGNF-000123:0' };
   h.clicks.handler({ position: { x: 10, y: 10 } });
@@ -208,6 +218,10 @@ test('a matched incident card carries the InciWeb line and click-through', async
     id: 'fire-perimeter:2026-NMGNF-000123:0',
   });
   h.clicks.handler({ position: { x: 10, y: 10 } });
+  // The card publishes immediately; the link line lands once the
+  // publication's currency is validated.
+  assert.equal(h.overlay.entries.get('fire-perimeters').length, 1);
+  await new Promise((done) => setTimeout(done, 0));
   const entries = h.overlay.entries.get('fire-perimeters');
   assert.equal(entries[0].details.at(-1), 'InciWeb ↗ · click card to open');
 
@@ -254,8 +268,10 @@ test('a complex member resolves to its complex page from the catalog', async () 
       pick: () => ({ id: 'fire-perimeter:2026-NMGNF-000123:0' }),
       inciwebIndex: [
         {
+          // Same state as the member fire: the state filter applies to
+          // complex fallbacks too.
           incident_id: '328923',
-          tau: 'ORPRD Rowe Creek Complex',
+          tau: 'NMPRD Rowe Creek Complex',
           incident_title: 'Rowe Creek Complex',
         },
       ],
@@ -263,8 +279,82 @@ test('a complex member resolves to its complex page from the catalog', async () 
   );
   await h.layer.update(h.viewer);
   h.clicks.handler({ position: { x: 10, y: 10 } });
+  await new Promise((done) => setTimeout(done, 0));
   const entries = h.overlay.entries.get('fire-perimeters');
   assert.equal(entries[0].details.at(-1), 'InciWeb ↗ · click card to open');
+});
+
+test('a stale or unverifiable publication yields no link', async () => {
+  const inciwebIndex = [
+    { incident_id: '100', tau: 'NMGNF Fixture Fire', incident_title: 'Fixture Fire' },
+  ];
+  for (const publication of [
+    // Created two years before this fire's discovery: an archived page.
+    async () => ({ createdMs: 1757900000000 - 700 * 86400000, changedMs: null }),
+    // Validation endpoint down: fail closed, no link.
+    async () => {
+      throw new Error('InciWeb HTTP 503');
+    },
+  ]) {
+    const h = harness(
+      { getSnapshot: async () => [row] },
+      {
+        pick: () => ({ id: 'fire-perimeter:2026-NMGNF-000123:0' }),
+        inciwebIndex,
+        publication,
+      },
+    );
+    await h.layer.update(h.viewer);
+    h.clicks.handler({ position: { x: 10, y: 10 } });
+    await new Promise((done) => setTimeout(done, 0));
+    const entries = h.overlay.entries.get('fire-perimeters');
+    assert.equal(entries.length, 1);
+    assert.equal(
+      entries[0].details.some((line) => line.includes('InciWeb')),
+      false,
+    );
+    assert.equal(entries[0].interactive, false);
+    h.layer.destroy(h.viewer);
+  }
+});
+
+test('a hanging InciWeb index fetch never blocks the perimeter refresh', async () => {
+  const h = harness(
+    { getSnapshot: async () => [row] },
+    { inciwebIndex: null },
+  );
+  // Replace the index source with one that never resolves.
+  h.layer.destroy(h.viewer);
+  const hanging = harness({ getSnapshot: async () => [row] });
+  hanging.layer.destroy(hanging.viewer);
+  const sources = [];
+  const viewer = {
+    scene: { pick: () => null },
+    dataSources: {
+      add: (v) => sources.push(v),
+      remove: (v) => sources.splice(sources.indexOf(v), 1),
+    },
+  };
+  const layer = createFirePerimetersLayer({
+    source: { getSnapshot: async () => [row] },
+    overlayHost: { setEntries() {}, setVisible() {}, clearSource() {}, hitTest: () => null },
+    screenSpaceEventHandlerFactory: () => ({ setInputAction() {}, destroy() {} }),
+    picking: {
+      resolvePickId: () => null,
+      isOwnedByOtherLayer: () => false,
+      registerPickOwner() {},
+      unregisterPickOwner() {},
+    },
+    pointer: { isPointerFree: () => true },
+    inciwebSource: { getIndex: () => new Promise(() => {}) },
+    inciwebPublications: { getPublication: async () => ({ createdMs: 1, changedMs: 1 }) },
+    openExternal: () => {},
+  });
+  layer.init(viewer);
+  layer.enable(viewer);
+  assert.equal(await layer.update(viewer), true);
+  assert.equal(layer.getStats().count, 1);
+  layer.destroy(viewer);
 });
 
 test('an InciWeb outage never breaks the perimeter refresh', async () => {
@@ -322,5 +412,8 @@ test('analyst records expose incident facts without geometry payloads', async ()
   assert.equal(records[0].county, 'Sandoval');
   assert.equal(records[0].costToDate, 4200000);
   assert.equal(records[0].complexity, 'Type 3 Incident');
+  // Spatial scoping in the analyst engine requires coordinates.
+  assert.ok(Math.abs(records[0].lat - 35.2333) < 0.01);
+  assert.ok(Math.abs(records[0].lon - -108.0333) < 0.01);
   assert.equal('polygons' in records[0], false);
 });

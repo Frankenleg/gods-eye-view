@@ -4,6 +4,9 @@ import {
   findInciwebLink,
   resolveInciwebNodeLink,
   createInciwebIndexSource,
+  createInciwebPublicationSource,
+  isCurrentPublication,
+  inciwebNodeId,
 } from './inciweb.js';
 
 const catalog = [
@@ -60,6 +63,20 @@ test('incidents resolve by exact normalized title to a node link', () => {
   assert.equal(resolveInciwebNodeLink(null, { name: 'Coyote', state: 'US-OR' }), null);
 });
 
+test('a unique candidate in the wrong state is rejected, not linked', () => {
+  // The catalog is all-time and nationwide: a current Arizona "Willow"
+  // must not link to the only "Willow Fire" on file when it's a Montana
+  // incident.
+  const willow = [
+    { incident_id: '300001', tau: 'MTFNF Willow Fire', incident_title: 'Willow Fire' },
+  ];
+  assert.equal(resolveInciwebNodeLink(willow, { name: 'Willow', state: 'US-AZ' }), null);
+  assert.equal(
+    resolveInciwebNodeLink(willow, { name: 'Willow', state: 'US-MT' }),
+    'https://inciweb.wildfire.gov/node/300001',
+  );
+});
+
 test('ambiguous titles disambiguate by state, then newest id', () => {
   const twoCoyotes = [
     { incident_id: '100', tau: 'AZASF Coyote Fire', incident_title: 'Coyote Fire' },
@@ -106,6 +123,103 @@ test('a complex member falls back to its complex page', () => {
     findInciwebLink(catalog, { name: 'Nope', state: 'US-NM', complexName: null }),
     null,
   );
+});
+
+test('a node link exposes its publication id', () => {
+  assert.equal(inciwebNodeId('https://inciweb.wildfire.gov/node/329195'), '329195');
+  assert.equal(inciwebNodeId('https://example.com/other'), null);
+  assert.equal(inciwebNodeId(null), null);
+});
+
+test('publication currency accepts pages created around or after discovery', () => {
+  const day = 24 * 3600000;
+  const discovery = 1785000000000;
+  // Created shortly before discovery (page opened as the fire started).
+  assert.equal(
+    isCurrentPublication(
+      { createdMs: discovery - 10 * day, changedMs: discovery + 30 * day },
+      { discoveredTime: discovery },
+    ),
+    true,
+  );
+  // Created years before discovery: an archived same-name incident.
+  assert.equal(
+    isCurrentPublication(
+      { createdMs: discovery - 900 * day, changedMs: discovery - 800 * day },
+      { discoveredTime: discovery },
+    ),
+    false,
+  );
+  // No discovery date: fall back to recent activity on the page.
+  const now = 1787600000000;
+  assert.equal(
+    isCurrentPublication(
+      { createdMs: now - 900 * day, changedMs: now - 20 * day },
+      { discoveredTime: null, nowMs: now },
+    ),
+    true,
+  );
+  assert.equal(
+    isCurrentPublication(
+      { createdMs: now - 900 * day, changedMs: now - 400 * day },
+      { discoveredTime: null, nowMs: now },
+    ),
+    false,
+  );
+  // Unusable timestamps fail closed.
+  assert.equal(
+    isCurrentPublication({ createdMs: null, changedMs: null }, { discoveredTime: discovery }),
+    false,
+  );
+});
+
+test('the publication source fetches timestamps and honors cancellation', async () => {
+  let requested;
+  const source = createInciwebPublicationSource({
+    fetchImpl: async (url) => {
+      requested = String(url);
+      return {
+        ok: true,
+        json: async () => ({
+          created: [{ value: '1785025540' }],
+          changed: [{ value: '1787589503' }],
+        }),
+      };
+    },
+  });
+  const publication = await source.getPublication('329195');
+  assert.equal(requested, 'https://inciweb.wildfire.gov/api/publication/329195');
+  assert.deepEqual(publication, {
+    createdMs: 1785025540000,
+    changedMs: 1787589503000,
+  });
+
+  const malformed = createInciwebPublicationSource({
+    fetchImpl: async () => ({ ok: true, json: async () => ({ nope: 1 }) }),
+  });
+  assert.deepEqual(await malformed.getPublication('1'), {
+    createdMs: null,
+    changedMs: null,
+  });
+
+  const failing = createInciwebPublicationSource({
+    fetchImpl: async () => ({ ok: false, status: 503 }),
+  });
+  await assert.rejects(failing.getPublication('1'), /InciWeb HTTP 503/);
+
+  const abort = new AbortController();
+  const cancelled = createInciwebPublicationSource({
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => {
+        abort.abort();
+        return {};
+      },
+    }),
+  });
+  await assert.rejects(cancelled.getPublication('1', { signal: abort.signal }), {
+    name: 'AbortError',
+  });
 });
 
 test('the index source posts an empty title for the full catalog', async () => {

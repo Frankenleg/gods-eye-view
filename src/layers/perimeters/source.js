@@ -30,18 +30,35 @@ const API_URL =
     f: 'geojson',
   }).toString();
 
+// The service caps a single response at its maxRecordCount (2000); a peak
+// season can exceed that, so follow exceededTransferLimit with offset pages.
+const MAX_PAGES = 5;
+
+const exceededTransferLimit = (payload) =>
+  payload?.exceededTransferLimit === true ||
+  payload?.properties?.exceededTransferLimit === true;
+
 /** Request and validate a complete WFIGS snapshot before it can replace displayed perimeters. */
 export function createWfigsPerimeterSource({
   fetchImpl = (...args) => globalThis.fetch(...args),
 } = {}) {
   return {
     async getSnapshot({ signal } = {}) {
-      signal?.throwIfAborted();
-      const response = await fetchImpl(API_URL, { signal });
-      if (!response.ok) throw new Error(`WFIGS HTTP ${response.status}`);
-      const payload = await response.json();
-      signal?.throwIfAborted();
-      const rows = normalizeFirePerimeterSnapshot(payload);
+      const features = [];
+      for (let page = 0; page < MAX_PAGES; page++) {
+        signal?.throwIfAborted();
+        const url =
+          page === 0 ? API_URL : `${API_URL}&resultOffset=${features.length}`;
+        const response = await fetchImpl(url, { signal });
+        if (!response.ok) throw new Error(`WFIGS HTTP ${response.status}`);
+        const payload = await response.json();
+        signal?.throwIfAborted();
+        if (!Array.isArray(payload?.features))
+          throw new Error('Malformed perimeter snapshot');
+        features.push(...payload.features);
+        if (!exceededTransferLimit(payload) || !payload.features.length) break;
+      }
+      const rows = normalizeFirePerimeterSnapshot({ features });
       if (!rows) throw new Error('Malformed perimeter snapshot');
       return rows;
     },

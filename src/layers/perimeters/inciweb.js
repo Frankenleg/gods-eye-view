@@ -41,28 +41,96 @@ export function resolveInciwebNodeLink(publications, { name, state }) {
       /^\d+$/.test(String(row?.incident_id ?? '')) &&
       normalizeName(row.incident_title) === wanted,
   );
-  if (candidates.length > 1) {
-    const statePrefix =
-      typeof state === 'string' && /^US-[A-Za-z]{2}$/.test(state)
-        ? state.slice(3).toLowerCase()
-        : null;
-    if (!statePrefix) return null;
+  // The catalog is all-time and nationwide, so the dispatch unit's state
+  // must corroborate every match — a globally unique title is NOT evidence
+  // it's the same fire (live data shows same-name incidents across states).
+  const statePrefix =
+    typeof state === 'string' && /^US-[A-Za-z]{2}$/.test(state)
+      ? state.slice(3).toLowerCase()
+      : null;
+  if (statePrefix) {
     candidates = candidates.filter(
       (row) =>
         typeof row.tau === 'string' &&
         row.tau.slice(0, 2).toLowerCase() === statePrefix,
     );
-    if (candidates.length > 1) {
-      candidates = [
-        candidates.reduce((a, b) =>
-          Number(a.incident_id) >= Number(b.incident_id) ? a : b,
-        ),
-      ];
-    }
+  } else if (candidates.length > 1) {
+    return null;
+  }
+  if (candidates.length > 1) {
+    // Same-state duplicates are usually reburns of the same name — newest
+    // wins here, and the publication-currency check guards the final link.
+    candidates = [
+      candidates.reduce((a, b) =>
+        Number(a.incident_id) >= Number(b.incident_id) ? a : b,
+      ),
+    ];
   }
   return candidates.length === 1
     ? `https://inciweb.wildfire.gov/node/${candidates[0].incident_id}`
     : null;
+}
+
+/** The publication id inside a node link produced above, or null. */
+export function inciwebNodeId(link) {
+  const match = /^https:\/\/inciweb\.wildfire\.gov\/node\/(\d+)$/.exec(
+    String(link ?? ''),
+  );
+  return match ? match[1] : null;
+}
+
+// A fire's InciWeb page is created around the incident's start; a match
+// whose page predates discovery by more than this is an archived
+// same-name incident from a earlier season.
+const CREATED_BEFORE_DISCOVERY_MS = 60 * 24 * 3600000;
+// Without a discovery date, require recent editorial activity on the page.
+const CHANGED_WITHIN_MS = 180 * 24 * 3600000;
+
+/**
+ * Whether a publication plausibly describes the given current incident.
+ * Fails closed on unusable timestamps.
+ * @param {{createdMs: ?number, changedMs: ?number}} publication
+ * @param {{discoveredTime: ?number, nowMs?: number}} incident
+ * @returns {boolean}
+ */
+export function isCurrentPublication(
+  { createdMs, changedMs },
+  { discoveredTime, nowMs = Date.now() },
+) {
+  if (Number.isFinite(discoveredTime) && Number.isFinite(createdMs)) {
+    return createdMs >= discoveredTime - CREATED_BEFORE_DISCOVERY_MS;
+  }
+  if (Number.isFinite(changedMs)) {
+    return nowMs - changedMs <= CHANGED_WITHIN_MS;
+  }
+  return false;
+}
+
+const epochMsOrNull = (value) => {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+};
+
+/** Fetch one publication's created/changed timestamps for currency checks. */
+export function createInciwebPublicationSource({
+  fetchImpl = (...args) => globalThis.fetch(...args),
+} = {}) {
+  return {
+    async getPublication(id, { signal } = {}) {
+      signal?.throwIfAborted();
+      const response = await fetchImpl(
+        `https://inciweb.wildfire.gov/api/publication/${id}`,
+        { signal },
+      );
+      if (!response.ok) throw new Error(`InciWeb HTTP ${response.status}`);
+      const payload = await response.json();
+      signal?.throwIfAborted();
+      return {
+        createdMs: epochMsOrNull(payload?.created?.[0]?.value),
+        changedMs: epochMsOrNull(payload?.changed?.[0]?.value),
+      };
+    },
+  };
 }
 
 /**
