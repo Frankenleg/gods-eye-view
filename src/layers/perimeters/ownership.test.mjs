@@ -69,6 +69,12 @@ const row = {
   category: 'WF',
   discoveredTime: 1757900000000,
   updatedTime: 1757950000000,
+  cause: 'Natural',
+  behavior: 'Active',
+  personnel: 380,
+  county: 'Sandoval',
+  costToDate: 4200000,
+  complexity: 'Type 3 Incident',
   polygons: [[ring]],
 };
 
@@ -178,5 +184,11 @@ test('analyst records expose incident facts without geometry payloads', async ()
   assert.equal(records[0].acres, 512.5);
   assert.equal(records[0].containedPct, 40);
   assert.equal(records[0].state, 'US-NM');
+  assert.equal(records[0].cause, 'Natural');
+  assert.equal(records[0].behavior, 'Active');
+  assert.equal(records[0].personnel, 380);
+  assert.equal(records[0].county, 'Sandoval');
+  assert.equal(records[0].costToDate, 4200000);
+  assert.equal(records[0].complexity, 'Type 3 Incident');
   assert.equal('polygons' in records[0], false);
 });

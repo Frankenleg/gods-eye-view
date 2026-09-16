@@ -183,6 +183,12 @@ export function createFirePerimetersLayer({
             category: row.category,
             discoveredTime: row.discoveredTime,
             updatedTime: row.updatedTime,
+            cause: row.cause,
+            behavior: row.behavior,
+            personnel: row.personnel,
+            county: row.county,
+            costToDate: row.costToDate,
+            complexity: row.complexity,
           };
           for (const [index, rings] of row.polygons.entries()) {
             const [outer, ...holes] = rings;
@@ -282,6 +288,12 @@ export function createFirePerimetersLayer({
           category: p?.category?.getValue(now) ?? null,
           discoveredTime: p?.discoveredTime?.getValue(now) ?? null,
           updatedTime: p?.updatedTime?.getValue(now) ?? null,
+          cause: p?.cause?.getValue(now) ?? null,
+          behavior: p?.behavior?.getValue(now) ?? null,
+          personnel: p?.personnel?.getValue(now) ?? null,
+          county: p?.county?.getValue(now) ?? null,
+          costToDate: p?.costToDate?.getValue(now) ?? null,
+          complexity: p?.complexity?.getValue(now) ?? null,
         });
       }
       return result;

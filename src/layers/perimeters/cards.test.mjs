@@ -34,6 +34,12 @@ test('a full incident row renders name, size, containment, and ages', () => {
       category: 'WF',
       discoveredTime: now - 36 * 3600000,
       updatedTime: now - 2 * 3600000,
+      cause: 'Natural',
+      behavior: 'Active',
+      personnel: 380,
+      county: 'Sandoval',
+      costToDate: 4200000,
+      complexity: 'Type 3 Incident',
     },
     now,
   );
@@ -41,6 +47,8 @@ test('a full incident row renders name, size, containment, and ages', () => {
   assert.equal(card.title, 'FIRE · Frijoles');
   assert.deepEqual(card.details, [
     '15,956 ac · 74% contained · US-NM',
+    'Natural cause · Active · Type 3 Incident',
+    '380 personnel · Sandoval County · $4.2M to date',
     'discovered 1d ago · updated 2h ago',
   ]);
   assert.equal(card.selected, true);
@@ -59,9 +67,42 @@ test('missing attributes degrade to available facts instead of placeholders', ()
       category: 'RX',
       discoveredTime: null,
       updatedTime: null,
+      cause: null,
+      behavior: null,
+      personnel: null,
+      county: null,
+      costToDate: null,
+      complexity: null,
     },
     1758000000000,
   );
   assert.equal(card.title, 'FIRE · Unnamed incident');
   assert.deepEqual(card.details, ['containment unknown · RX']);
+});
+
+test('partial incident details render only the facts that exist', () => {
+  const card = buildIncidentCard(
+    {
+      stableId: 'x',
+      name: 'Whiskey',
+      acres: 542,
+      containedPct: 48,
+      state: 'US-NM',
+      category: 'WF',
+      discoveredTime: null,
+      updatedTime: null,
+      cause: 'Human',
+      behavior: null,
+      personnel: null,
+      county: 'Catron',
+      costToDate: 85000,
+      complexity: null,
+    },
+    1758000000000,
+  );
+  assert.deepEqual(card.details, [
+    '542 ac · 48% contained · US-NM',
+    'Human cause',
+    'Catron County · $85K to date',
+  ]);
 });
