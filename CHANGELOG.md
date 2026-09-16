@@ -1,5 +1,15 @@
 # Changelog
 
+- New Fire Perimeters layer (Events group): live NIFC WFIGS interagency
+  wildfire incident perimeters as ground-clamped polygons with a
+  containment-colored fire line, refreshed every 5 minutes from the public
+  keyless feature service with truncation paging. Clicking a perimeter shows
+  an incident card (acreage, containment, cause, behavior, personnel, county,
+  cost, complex membership) and, when the incident has a state- and
+  recency-verified InciWeb page, a click-through link to it. The layer is
+  reachable from the panel, voice control, share links (token `k`), and the
+  analyst query engine.
+
 - Director scene documents now support bounded data-pack manifests, per-shot
   selection and registered GeoJSON/PNG/media loaders with explicit placement,
   visible attribution and cancellation/disposal on Stop or replacement.
