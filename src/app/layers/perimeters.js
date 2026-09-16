@@ -2,6 +2,7 @@ import * as Cesium from 'cesium';
 import {
   createFirePerimetersLayer,
   createInciwebIndexSource,
+  createInciwebLookupSource,
 } from '../../layers/perimeters/index.js';
 import * as picking from '../../data/pickRegistry.js';
 import * as overlays from '../../overlays/worldOverlay.js';
@@ -17,6 +18,7 @@ export function createApplicationFirePerimeters(options) {
       hitTest: overlays.hitTestWorldOverlay,
     },
     inciwebSource: createInciwebIndexSource(),
+    inciwebLookup: createInciwebLookupSource(),
     openExternal: (url) => window.open(url, '_blank', 'noopener,noreferrer'),
     screenSpaceEventHandlerFactory: (viewer) =>
       new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas),

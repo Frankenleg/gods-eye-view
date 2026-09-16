@@ -4,7 +4,7 @@ import {
   perimeterAnchorDegrees,
   buildIncidentCard,
 } from './cards.js';
-import { findInciwebLink } from './inciweb.js';
+import { findInciwebLink, resolveInciwebNodeLink } from './inciweb.js';
 export { normalizeFirePerimeterSnapshot } from './records.js';
 export { createWfigsPerimeterSource } from './source.js';
 export * from './cards.js';
@@ -32,6 +32,7 @@ export function createFirePerimetersLayer({
   picking = null,
   pointer = null,
   inciwebSource = null,
+  inciwebLookup = null,
   openExternal = null,
 } = {}) {
   if (typeof source?.getSnapshot !== 'function')
@@ -49,6 +50,39 @@ export function createFirePerimetersLayer({
   let _selectedCardId = null;
   let _inciwebIndex = [];
   const _rowById = new Map();
+  // Lookup results by incident id; a stored null means "searched, no page".
+  // Failed lookups are NOT cached so a transient outage retries later.
+  const _linkCache = new Map();
+  const _lookupsInFlight = new Set();
+
+  /**
+   * Resolve a link for one incident the RSS index missed, via InciWeb's
+   * publication search (the index only carries the ~50 most recently
+   * updated incidents). Async: the card re-publishes when the answer
+   * arrives, if that incident is still selected.
+   */
+  async function lookUpMissingLink(row) {
+    if (_lookupsInFlight.has(row.stableId)) return;
+    _lookupsInFlight.add(row.stableId);
+    try {
+      let link = resolveInciwebNodeLink(
+        await inciwebLookup.lookup(row.name),
+        row,
+      );
+      if (!link && row.complexName) {
+        link = resolveInciwebNodeLink(
+          await inciwebLookup.lookup(row.complexName),
+          { name: row.complexName, state: row.state },
+        );
+      }
+      _linkCache.set(row.stableId, link);
+      if (_selectedId === row.stableId) publishSelectedCard();
+    } catch {
+      // Search unavailable — the card simply stays linkless this time.
+    } finally {
+      _lookupsInFlight.delete(row.stableId);
+    }
+  }
 
   const canSelect = () =>
     overlayHost && screenSpaceEventHandlerFactory && picking;
@@ -69,6 +103,13 @@ export function createFirePerimetersLayer({
     }
     const anchor = perimeterAnchorDegrees(row.polygons);
     _selectedLink = findInciwebLink(_inciwebIndex, row);
+    if (!_selectedLink) {
+      if (_linkCache.has(row.stableId)) {
+        _selectedLink = _linkCache.get(row.stableId);
+      } else if (inciwebLookup && row.name) {
+        lookUpMissingLink(row);
+      }
+    }
     const card = {
       ...buildIncidentCard(row, Date.now(), { link: _selectedLink }),
       position: Cesium.Cartesian3.fromDegrees(anchor.lon, anchor.lat),
@@ -295,6 +336,8 @@ export function createFirePerimetersLayer({
       removeClickHandler();
       clearSelection();
       _rowById.clear();
+      _linkCache.clear();
+      _lookupsInFlight.clear();
       _viewer = null;
       _enabled = false;
       if (_dataSource) {
