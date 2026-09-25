@@ -1,5 +1,14 @@
 # Changelog
 
+- New Smoke Plumes layer (Events group, beside Fire Perimeters): NOAA
+  Hazard Mapping System analyst-drawn wildfire smoke extents as
+  ground-clamped polygons shaded by density (Light/Medium/Heavy),
+  refreshed every 10 minutes through a bounded same-origin proxy over
+  the keyless OSPO day files. Clicking a plume shows its density,
+  observing satellite, observation window and age. Reachable from the
+  panel, voice control, share links (token `3`) and the analyst query
+  engine.
+
 - Region scopes in voice analyst queries ("in the Gulf of Mexico", "over
   the Alps") work again in the dev server: the bundled Natural Earth and
   neighborhood packs are fetched as JSON in the browser
