@@ -1832,6 +1832,11 @@
       "src/layers/perimeters/records.js",
       "src/layers/perimeters/cards.js",
       "src/layers/perimeters/inciweb.js",
+      "src/app/layers/smoke.js",
+      "src/layers/smoke/index.js",
+      "src/layers/smoke/source.js",
+      "src/layers/smoke/records.js",
+      "src/layers/smoke/cards.js",
       "src/layers/cctv/sourcePolicy.js",
       "src/sources/reference.js",
       "src/search/nominatim.js",
@@ -2336,6 +2341,11 @@
       "src/layers/perimeters/records.js",
       "src/layers/perimeters/cards.js",
       "src/layers/perimeters/inciweb.js",
+      "src/app/layers/smoke.js",
+      "src/layers/smoke/index.js",
+      "src/layers/smoke/source.js",
+      "src/layers/smoke/records.js",
+      "src/layers/smoke/cards.js",
       "src/layers/cctv/sourcePolicy.js",
       "src/search/nominatim.js",
       "src/nominatimGeocode.js",
@@ -2719,6 +2729,8 @@
       "src/sources/httpBody.js",
       "src/layers/perimeters/source.js",
       "src/layers/perimeters/records.js",
+      "src/layers/smoke/source.js",
+      "src/layers/smoke/records.js",
       "src/layers/submarineCables/bundledSource.js"
     ],
     "external": []
@@ -2934,6 +2946,26 @@
       "src/layers/perimeters/records.js",
       "src/sources/httpBody.js",
       "src/layers/perimeters/source.js"
+    ],
+    "external": []
+  },
+  "smoke": {
+    "exports": ["./layers/smoke"],
+    "modules": [
+      "src/layers/smoke/index.js",
+      "src/sources/httpBody.js",
+      "src/layers/smoke/source.js",
+      "src/layers/smoke/records.js",
+      "src/layers/smoke/cards.js"
+    ],
+    "external": ["cesium"]
+  },
+  "smoke-source": {
+    "exports": ["./layers/smoke/source"],
+    "modules": [
+      "src/layers/smoke/records.js",
+      "src/sources/httpBody.js",
+      "src/layers/smoke/source.js"
     ],
     "external": []
   }

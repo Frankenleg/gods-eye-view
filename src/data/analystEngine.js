@@ -77,6 +77,11 @@ export const ANALYST_LAYERS = {
     text: ['name', 'operator', 'river', 'output'],
     flags: [],
   },
+  smoke: {
+    numeric: ['startTime', 'endTime'],
+    text: ['density', 'satellite'],
+    flags: [],
+  },
   'fire-perimeters': {
     numeric: ['acres', 'containedPct', 'personnel', 'costToDate'],
     text: ['name', 'state', 'county', 'cause', 'behavior', 'complexity'],

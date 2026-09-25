@@ -95,6 +95,12 @@ export const DATA_CREDITS = [
       '<a href="https://inciweb.wildfire.gov/" target="_blank" rel="noopener">InciWeb</a>',
   },
   {
+    key: 'hms-smoke',
+    html:
+      'Smoke plumes: ' +
+      '<a href="https://www.ospo.noaa.gov/products/land/hms.html" target="_blank" rel="noopener">NOAA OSPO Hazard Mapping System</a>',
+  },
+  {
     key: 'overpass',
     html:
       'Road geometry (traffic): ' +
